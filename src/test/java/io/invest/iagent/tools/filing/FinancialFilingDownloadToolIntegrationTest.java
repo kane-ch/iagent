@@ -15,7 +15,7 @@ public class FinancialFilingDownloadToolIntegrationTest {
 
     @BeforeEach
     public void before(){
-        Path workspace = Paths.get(System.getProperty("user.dir")).resolve("./test-filings");
+        Path workspace = Paths.get(System.getProperty("user.dir")).resolve("workspace");
         String userAgent = "io/yiying5@gmail.com";
         tool =  new FinancialFilingDownloadTool(workspace, userAgent);
     }
@@ -45,9 +45,21 @@ public class FinancialFilingDownloadToolIntegrationTest {
     }
 
     @Test
-    void downloadLi20F() {
+    void downloadGoogle() {
+        String ticker = "GOOGL";
+        String fy = "2024,2025,2026";
+        String filingType = "10-Q,10-K";
+        String result = tool.downloadFiling(ticker, fy, filingType);
+        System.out.println(result);
+        Assertions.assertThat(Objects.requireNonNull(result))
+                .containsAnyOf( ticker,fy,filingType);
+
+    }
+
+    @Test
+    void downloadLi() {
         String ticker = "LI";
-        String fy = "2025";
+        String fy = "2025,2026";
         String filingType = "20-F,6-K";
         String result = tool.downloadFiling(ticker, fy, filingType);
         System.out.println(result);
@@ -58,7 +70,7 @@ public class FinancialFilingDownloadToolIntegrationTest {
     @Test
     void downloadPdd() {
         String ticker = "PDD";
-        String fy = "2024,2025,2026";
+        String fy = "2025,2026";
         String filingType = "20-F,6-K";
         String result = tool.downloadFiling(ticker, fy, filingType);
         System.out.println(result);
@@ -69,7 +81,7 @@ public class FinancialFilingDownloadToolIntegrationTest {
     @Test
     void downloadBABA() {
         String ticker = "BABA";
-        String fy = "2024,2025,2026";
+        String fy = "2022,2023,2024,2025,2026";
         String filingType = "20-F,6-K";
         String result = tool.downloadFiling(ticker, fy, filingType);
         System.out.println(result);
