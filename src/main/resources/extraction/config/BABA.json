@@ -8,56 +8,63 @@
     {
       "segmentCode": "TAOBAO_TMALL",
       "segmentName": "Taobao and Tmall Group",
-      "aliases": ["淘宝天猫", "淘天集团", "Taobao & Tmall", "Taobao and Tmall"],
+      "aliases": ["淘宝天猫", "淘天集团", "Taobao & Tmall", "Taobao and Tmall","Alibaba China E-commerce Group","China commerce"],
       "level": 1,
       "parentCode": null
     },
     {
       "segmentCode": "CHINA_COMMERCE_RETAIL",
       "segmentName": "China commerce retail",
-      "aliases": ["中国商业零售"],
+      "aliases": ["中国商业零售","E-commerce","China commerce retail"],
       "level": 2,
       "parentCode": "TAOBAO_TMALL"
     },
     {
       "segmentCode": "CUSTOMER_MANAGEMENT",
       "segmentName": "Customer management",
-      "aliases": ["客户管理"],
+      "aliases": ["客户管理","Customer management","Customer management"],
+      "level": 3,
+      "parentCode": "CHINA_COMMERCE_RETAIL"
+    },
+    {
+      "segmentCode": "QUICK_COMMERCE",
+      "segmentName": "Quick commerce",
+      "aliases": ["即时零售","Quick commerce"],
       "level": 3,
       "parentCode": "CHINA_COMMERCE_RETAIL"
     },
     {
       "segmentCode": "DIRECT_SALES",
       "segmentName": "Direct sales and others",
-      "aliases": ["直销及其他"],
+      "aliases": ["直销及其他"," Direct sales, logistics and others"," Direct sales and others"],
       "level": 3,
       "parentCode": "CHINA_COMMERCE_RETAIL"
     },
     {
       "segmentCode": "CHINA_COMMERCE_WHOLESALE",
       "segmentName": "China commerce wholesale",
-      "aliases": ["中国商业批发"],
+      "aliases": ["中国商业批发","China commerce wholesale"],
       "level": 2,
       "parentCode": "TAOBAO_TMALL"
     },
     {
       "segmentCode": "INTERNATIONAL_DIGITAL_COMMERCE",
       "segmentName": "International Digital Commerce Group",
-      "aliases": ["国际数字商业", "国际电商", "AIDC"],
+      "aliases": ["国际数字商业", "国际电商", "AIDC","Alibaba International Digital Commerce Group","International commerce"],
       "level": 1,
       "parentCode": null
     },
     {
       "segmentCode": "INTERNATIONAL_COMMERCE_RETAIL",
       "segmentName": "International commerce retail",
-      "aliases": ["国际商业零售"],
+      "aliases": ["国际商业零售","International commerce retail"],
       "level": 2,
       "parentCode": "INTERNATIONAL_DIGITAL_COMMERCE"
     },
     {
       "segmentCode": "INTERNATIONAL_COMMERCE_WHOLESALE",
       "segmentName": "International commerce wholesale",
-      "aliases": ["国际商业批发"],
+      "aliases": ["国际商业批发","International commerce wholesale"],
       "level": 2,
       "parentCode": "INTERNATIONAL_DIGITAL_COMMERCE"
     },
@@ -78,21 +85,7 @@
     {
       "segmentCode": "LOCAL_SERVICES",
       "segmentName": "Local Services Group",
-      "aliases": ["本地服务", "Local services", "Local"],
-      "level": 1,
-      "parentCode": null
-    },
-    {
-      "segmentCode": "DIGITAL_MEDIA_ENTERTAINMENT",
-      "segmentName": "Digital Media and Entertainment Group",
-      "aliases": ["数字媒体及娱乐", "数娱", "Digital Media"],
-      "level": 1,
-      "parentCode": null
-    },
-    {
-      "segmentCode": "OTHERS",
-      "segmentName": "Others",
-      "aliases": ["其他"],
+      "aliases": ["本地服务", "Local services", "Local","Local consumer services"],
       "level": 1,
       "parentCode": null
     }
@@ -105,10 +98,6 @@
     {
       "standardMetricCode": "ADJUSTED_EBITA",
       "rawMetricNames": ["Adjusted EBITA", "调整后EBITA", "经调整EBITA"]
-    },
-    {
-      "standardMetricCode": "OPERATING_INCOME",
-      "rawMetricNames": ["Operating Income", "经营利润", "营业利润"]
     }
   ]
 }

@@ -101,11 +101,11 @@ public class FinancialFilingDownloadToolIntegrationTest {
     }
 
     @Test
-    @Disabled
+    @Disabled("Integration test requires network access, run manually if needed")
     void downloadTencent() {
         String ticker = "00700";
-        String fy = "2025";
-        String result = tool.downloadFiling(ticker, fy, null);
+        String fy = "2024,2025,2026";
+        String result = tool.downloadFiling(ticker, fy, null,false);
         System.out.println(result);
         Assertions.assertThat(Objects.requireNonNull(result))
                 .containsAnyOf( ticker,fy);

@@ -5,6 +5,7 @@ import io.invest.iagent.service.extraction.model.Segment;
 import io.invest.iagent.service.extraction.model.SegmentMetric;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.springframework.util.CollectionUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -31,6 +33,34 @@ class FinancialExtractionServiceTest {
         Assertions.assertEquals(1432D,localValue(segments,"CLOUD_INTELLIGENCE","ADJUSTED_EBITA","2024Q1"));
         Assertions.assertEquals(425526D,localValue(getSubSegments(segments,"TAOBAO_TMALL"),"CHINA_COMMERCE_RETAIL","REVENUE","2025FY"));
         Assertions.assertEquals(414414D,localValue(getSubSegments(segments,"TAOBAO_TMALL"),"CHINA_COMMERCE_RETAIL","REVENUE","2024FY"));
+    }
+
+    @Test
+    public void extract_baba2() throws IOException {
+        File file = Paths.get(System.getProperty("user.dir")).resolve("workspace/portfolio/BABA/filings/fil_0001104659-22-026569/tm227577d1_ex99-1.htm").toFile() ;
+        FinancialExtractionService service = new FinancialExtractionService("BABA",workspace);
+        List<Segment> segments = service.extractFromHtmlFile(file) ;
+        Assertions.assertNotNull(segments);
+        System.out.println(JSON.toJSONString(segments));
+        Assertions.assertEquals(3831,locale(segments,"CHINA_COMMERCE_WHOLESALE").getMetric("REVENUE","2020Q4").getValue());
+        Assertions.assertEquals(101449,locale(segments,"CUSTOMER_MANAGEMENT").getMetric("REVENUE","2020Q4").getValue());
+    }
+
+    public Segment locale(List<Segment> segments,String segmentCode){
+        if(CollectionUtils.isEmpty(segments)){
+            return null ;
+        }
+        Segment target = segments.stream()
+                .filter(segment -> segment.getSegmentCode().equals(segmentCode))
+                .findFirst().orElse(null);
+        if(target != null){
+            return target ;
+        }
+        target = segments.stream().map(Segment::getChildren)
+                .map(t->locale(t,segmentCode))
+                .filter(Objects::nonNull)
+                .findFirst().orElse(null) ;
+        return target ;
     }
 
     @Test

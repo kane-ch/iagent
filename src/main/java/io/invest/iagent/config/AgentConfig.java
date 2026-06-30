@@ -31,6 +31,7 @@ import io.invest.iagent.service.kb.vector.VectorStoreServiceByMilvus;
 import io.invest.iagent.tools.*;
 import io.invest.iagent.tools.filing.FinancialFilingDownloadTool;
 import io.invest.iagent.tools.filing.FinancialMetricsQueryTool;
+import io.invest.iagent.tools.filing.FinancialSegmentMetricsTool;
 import io.invest.iagent.tools.kb.FilingKnowledgeBaseTool;
 import io.invest.iagent.tools.web.CompanySourceSearchTool;
 import io.invest.iagent.tools.web.WebSearchTool;
@@ -329,6 +330,7 @@ public class AgentConfig {
                                         .build()
                         ).build());
         toolkit.registerTool(new StockInfoTool());
+        toolkit.registerTool(new FinancialSegmentMetricsTool(workspace));
         // shell-command
         ShellCommandTool shellCommandTool = new ShellCommandTool(Set.of("python","python3"));
         toolkit.registerTool(shellCommandTool);

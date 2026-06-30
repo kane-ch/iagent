@@ -71,54 +71,23 @@ public class FinancialExtractionService {
         if(CollectionUtils.isEmpty(files)){
             return List.of() ;
         }
-        List<Segment> segments = files.stream().map(t-> {
+        List<Segment> segments = Lists.newArrayList() ;
+        for(Path file : files){
             try {
-                return extractFromHtmlFile(t.toFile());
+                List<Segment> subs = extractFromHtmlFile(file.toFile());
+                if(Objects.nonNull(subs)){
+                    segments.addAll(subs) ;
+                }
             } catch (IOException e) {
-                log.error("extract failed:{}",t.toAbsolutePath(),e);
+                log.error("extract failed:{}",file.toAbsolutePath(),e);
                 return null;
             }
-        }).filter(Objects::nonNull).flatMap(List::stream).toList() ;
-        return merge(segments);
+        }
+
+        return SegmentMetricUtil.merge(segments);
     }
 
-    private List<Segment> merge(List<Segment> segments){
-        if(CollectionUtils.isEmpty(segments)){
-            return List.of() ;
-        }
-        return segments.stream()
-                .collect(Collectors.toMap(Segment::getSegmentCode,t->t, this::doMerge))
-                .values().stream().toList();
-    }
 
-    private Segment doMerge(Segment s1,Segment s2){
-        if(Objects.isNull(s1)){
-            return s2 ;
-        }
-        if(Objects.isNull(s2)){
-            return s1 ;
-        }
-        // metrics
-        List<SegmentMetric> metrics = Lists.newArrayList();
-        if(!CollectionUtils.isEmpty(s1.getMetrics())){
-            metrics.addAll(s1.getMetrics()) ;
-        }
-        if(!CollectionUtils.isEmpty(s2.getMetrics())){
-            metrics.addAll(s2.getMetrics()) ;
-        }
-        // children
-        List<Segment> children = Lists.newArrayList();
-        if(!CollectionUtils.isEmpty(s1.getChildren())){
-            children.addAll(s1.getChildren()) ;
-        }
-        if(!CollectionUtils.isEmpty(s2.getChildren())){
-            children.addAll(s2.getChildren()) ;
-        }
-        // wrap
-        s1.setMetrics(metrics);
-        s1.setChildren(children);
-        return s1 ;
-    }
 
     /**
      * 从HTML文件中提取财务数据

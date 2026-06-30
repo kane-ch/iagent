@@ -2,13 +2,11 @@ package io.invest.iagent.service.extraction.extractor;
 
 import com.google.common.collect.Lists;
 import io.invest.iagent.service.extraction.model.FinancialTable;
-import io.invest.iagent.service.extraction.model.TableCell;
 import io.invest.iagent.service.extraction.model.TableRow;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.CollectionUtils;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 public class PeriodTypeUtil {
@@ -42,11 +40,11 @@ public class PeriodTypeUtil {
             return "FY" ;
         }
         // half
-        boolean hasHalfEnded = rows.stream()
-                .anyMatch(row -> contains(row, "six months ended"));
-        if(hasHalfEnded){
-            return "H" ;
-        }
+//        boolean hasHalfEnded = rows.stream()
+//                .anyMatch(row -> contains(row, "six months ended"));
+//        if(hasHalfEnded){
+//            return "H" ;
+//        }
         // quarter
         boolean hasQuarterEnded = rows.stream()
                 .anyMatch(row -> contains(row, "three months ended"));

@@ -62,34 +62,50 @@ public class DataExtractor {
 
     /**
      * 为单个分部提取指标数据 - 提取所有周期的数据
+     * 支持在同一表格中提取多种指标（如收入和营业利润在同一表格）
      */
     private void extractMetricsForSegment(Segment segment, FinancialTable table) {
-        // 找到对应的表格行
-        TableRow row = findSegmentRow(segment, table);
-        if (row == null) {
-            logger.trace("No row found for segment: {} in table: {}",
-                segment.getSegmentName(), table.getTitle());
+        // 首先从表格标题判断可能的指标类型
+        List<String> possibleMetrics = inferPossibleMetricsFromTable(table);
+        if (possibleMetrics.isEmpty()) {
+            logger.trace("Could not infer any metric type from table: {}", table.getTitle());
             return;
         }
 
-        logger.trace("Found row for segment: {} in table: {}, row label: {}, cells: {}",
-            segment.getSegmentName(), table.getTitle(), row.getLabel(), row.getCells().size());
+        // 对每个可能的指标类型，尝试找到对应的行并提取数据
+        for (String metricCode : possibleMetrics) {
+            // 找到该指标对应的分部行
+            TableRow row = findSegmentRowForMetric(segment, metricCode, table);
+            if (row == null) {
+                logger.trace("No row found for segment: {} metric: {} in table: {}",
+                    segment.getSegmentName(), metricCode, table.getTitle());
+                continue;
+            }
 
+            logger.trace("Found row for segment: {} metric: {} in table: {}, row label: {}, cells: {}",
+                segment.getSegmentName(), metricCode, table.getTitle(), row.getLabel(), row.getCells().size());
+
+            // 提取该指标的数值数据
+            extractMetricDataForRow(segment, metricCode, row, table);
+        }
+    }
+
+    /**
+     * 为指定行和指标类型提取数值数据
+     */
+    private void extractMetricDataForRow(Segment segment, String metricCode, TableRow row, FinancialTable table) {
         // 从行中提取数值数据 - 遍历所有单元格，每个有数值的列代表一个周期
         List<TableCell> cells = row.getCells();
-
-        // 遍历所有有数值的单元格，每个单元格代表一个周期
-        String metricCode = inferMetricFromTable(table);
-        if (metricCode == null) {
-            logger.trace("Could not infer metric type from table: {}", table.getTitle());
-            return;
-        }
 
         // 从表格标题中提取年份和季度信息
         String title = table.getTitle() != null ? table.getTitle() : "";
         int titleYear = extractYearFromText(title);
+        // period
         String periodType = PeriodTypeUtil.determinePeriodType(table);
-
+        if(StringUtils.isBlank(periodType)){
+            logger.trace("Could not infer Period type from table: {}", table.getTitle());
+            return ;
+        }
         // 步骤1：首先扫描表格前几行，收集所有可能包含年份的位置
         java.util.Map<Integer, Integer> columnYearMap = new java.util.HashMap<>();
         for (int r = 0; r < Math.min(5, table.getRows().size()); r++) {
@@ -174,61 +190,309 @@ public class DataExtractor {
     }
 
     /**
-     * 找到分部对应的表格行
+     * 找到分部对应的表格行（兼容老接口）
      */
     private TableRow findSegmentRow(Segment segment, FinancialTable table) {
+        return findSegmentRowForMetric(segment, null, table);
+    }
+
+    /**
+     * 找到分部和指定指标对应的表格行
+     * 支持分节表格结构（如谷歌财报：先有Revenues标题和所有分部的收入，然后有Operating Income标题和所有分部的营业利润）
+     */
+    private TableRow findSegmentRowForMetric(Segment segment, String metricCode, FinancialTable table) {
         String segmentName = segment.getSegmentName();
         String segmentCode = segment.getSegmentCode();
 
-        // 获取所有行标签用于调试
-        if (!table.getRows().isEmpty()) {
-            logger.trace("Table rows for {}: {}", table.getTitle(),
-                table.getRows().stream().map(TableRow::getLabel).toList());
+        // 步骤1：找到指标对应的节标题位置
+        int sectionHeaderRow = findMetricSectionHeaderRow(metricCode, table);
+        logger.trace("Section header for metric '{}' found at row: {}", metricCode, sectionHeaderRow);
+
+        // 步骤2：确定搜索范围
+        int startRow = (sectionHeaderRow >= 0) ? sectionHeaderRow + 1 : 0;
+        int endRow = table.getRows().size();
+
+        // 步骤3：如果找到了节标题，需要找到下一个节标题的位置作为结束边界
+        if (sectionHeaderRow >= 0) {
+            int nextSectionHeader = findNextSectionHeaderRow(table, sectionHeaderRow + 1);
+            if (nextSectionHeader >= 0) {
+                endRow = nextSectionHeader;
+            }
+            logger.trace("Searching for segment '{}' in rows {} to {}", segmentName, startRow, endRow);
         }
 
-        // 优先按编码匹配
-        if (segmentCode != null) {
-            for (TableRow row : table.getRows()) {
-                if (row.getLabel() != null) {
-                    String lowerLabel = row.getLabel().toLowerCase().trim();
-                    if (lowerLabel.contains(segmentCode.toLowerCase()) ||
-                        lowerLabel.contains(segmentCode.replace("_", " ").toLowerCase())) {
-                        return row;
-                    }
-                }
+        // 步骤4：在指定范围内搜索匹配的分部行
+        for (int i = startRow; i < endRow && i < table.getRows().size(); i++) {
+            TableRow row = table.getRows().get(i);
+            if (row.getLabel() == null) continue;
+            String lowerLabel = row.getLabel().toLowerCase().trim();
+
+            // 检查是否匹配分部编码或名称（优先精确匹配）
+            if (matchesSegment(lowerLabel, segmentCode, segmentName)) {
+                logger.trace("Found row for segment '{}' metric '{}' at row {}: {}",
+                    segmentName, metricCode, i, row.getLabel());
+                return row;
             }
         }
 
-        // 按名称匹配（模糊匹配）
-        if (segmentName != null) {
-            String[] nameParts = segmentName.toLowerCase().split("\\s+");
-            for (TableRow row : table.getRows()) {
-                if (row.getLabel() != null) {
-                    String lowerLabel = row.getLabel().toLowerCase().trim();
-                    // 完全匹配
-                    if (lowerLabel.contains(segmentName.toLowerCase())) {
-                        return row;
-                    }
-                    // 部分匹配（至少匹配一半的单词）
-                    int matchCount = 0;
-                    for (String part : nameParts) {
-                        if (lowerLabel.contains(part)) {
-                            matchCount++;
-                        }
-                    }
-                    if (matchCount >= Math.max(1, nameParts.length / 2)) {
-                        logger.trace("Fuzzy match for {}: {}", segmentName, row.getLabel());
-                        return row;
-                    }
-                }
-            }
+        // 如果没有找到，尝试不使用节边界搜索（整个表格）
+        if (sectionHeaderRow >= 0) {
+            logger.trace("No match found in section, searching entire table for segment '{}'", segmentName);
+            return findSegmentRowForMetric(segment, null, table);
         }
 
         return null;
     }
 
     /**
-     * 根据表格标题推断指标类型
+     * 检查标签是否匹配分部（支持编码、名称的精确匹配、前缀匹配、后缀匹配）
+     */
+    private boolean matchesSegment(String lowerLabel, String segmentCode, String segmentName) {
+        // 构建需要匹配的候选名称列表
+        List<String> candidates = new java.util.ArrayList<>();
+        if (segmentCode != null) {
+            candidates.add(segmentCode.toLowerCase());
+            candidates.add(segmentCode.replace("_", " ").toLowerCase());
+        }
+        if (segmentName != null) {
+            candidates.add(segmentName.toLowerCase().trim());
+        }
+
+        String trimmedLowerLabel = lowerLabel.trim();
+
+        // 匹配策略：按优先级尝试
+        for (String candidate : candidates) {
+            // 1. 精确匹配整个标签（最高优先级）
+            if (trimmedLowerLabel.equals(candidate)) {
+                return true;
+            }
+            // 2. 标签以分部名称结尾（如 "China commerce retail - Customer management" 匹配 "Customer management"）
+            // 格式：父分部 - 子分部
+            if (trimmedLowerLabel.endsWith(" - " + candidate)) {
+                return true;
+            }
+            // 3. 标签以分部名称结尾，前面是连字符加空格
+            if (trimmedLowerLabel.endsWith("- " + candidate)) {
+                return true;
+            }
+            // 4. 标签以分部名称开头，后面有连字符和空格
+            // 如 "- Direct sales and others" 匹配 "Direct sales and others"
+            if (trimmedLowerLabel.startsWith("- " + candidate)) {
+                return true;
+            }
+            // 5. 标签以分部名称开头（优先匹配更长的前缀，避免短前缀误匹配
+            if (trimmedLowerLabel.startsWith(candidate + " ") ||
+                trimmedLowerLabel.startsWith(candidate + "(") ||
+                trimmedLowerLabel.startsWith(candidate + "-")) {
+                return true;
+            }
+            // 6. 标签包含整个分部名称（前后有空格或边界）
+            if (lowerLabel.contains(" " + candidate + " ") ||
+                lowerLabel.startsWith(candidate + " ") ||
+                lowerLabel.endsWith(" " + candidate)) {
+                return true;
+            }
+        }
+
+        // 6. 模糊匹配（必须匹配所有单词）
+        // 只有当分部名称包含多个单词时才尝试模糊匹配
+        if (segmentName != null) {
+            String[] nameParts = segmentName.toLowerCase().split("\\s+");
+            if (nameParts.length >= 2) {
+                // 必须匹配所有单词才能认为是同一个分部
+                int matchCount = 0;
+                for (String part : nameParts) {
+                    if (lowerLabel.contains(part)) {
+                        matchCount++;
+                    }
+                }
+                if (matchCount == nameParts.length) {
+                    // 额外检查：避免通用词匹配导致的错误
+                    // 检查是否包含 "international" 但分部名称不包含
+                    if (lowerLabel.contains("international") &&
+                        !segmentName.toLowerCase().contains("international")) {
+                        return false;
+                    }
+                    // 检查是否包含 "china" 但分部名称不包含
+                    if (lowerLabel.contains("china") &&
+                        !segmentName.toLowerCase().contains("china")) {
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 找到指标对应的节标题行位置
+     */
+    private int findMetricSectionHeaderRow(String metricCode, FinancialTable table) {
+        if (metricCode == null) {
+            return -1;
+        }
+
+        List<String> keywords = getMetricKeywords(metricCode);
+        if (keywords.isEmpty()) {
+            return -1;
+        }
+
+        // 搜索包含指标关键词的标题行
+        for (int i = 0; i < table.getRows().size(); i++) {
+            TableRow row = table.getRows().get(i);
+            if (row.getLabel() == null) continue;
+            String lowerLabel = row.getLabel().toLowerCase().trim();
+
+            // 检查是否是指标节标题（包含关键词且以冒号结尾）
+            for (String keyword : keywords) {
+                if (lowerLabel.contains(keyword)) {
+                    // 典型的节标题格式："Revenues:", "Operating income (loss):"
+                    if (lowerLabel.endsWith(":") || lowerLabel.contains("total")) {
+                        return i;
+                    }
+                    // 也可能是表格标题的一部分
+                    if (table.getTitle() != null && table.getTitle().toLowerCase().contains(keyword)) {
+                        return -1; // 指标在表格标题中，不需要节边界
+                    }
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /**
+     * 找到下一个节标题行的位置
+     */
+    private int findNextSectionHeaderRow(FinancialTable table, int startRow) {
+        for (int i = startRow; i < table.getRows().size(); i++) {
+            TableRow row = table.getRows().get(i);
+            if (row.getLabel() == null) continue;
+            String lowerLabel = row.getLabel().toLowerCase().trim();
+
+            // 检查是否是另一个节的标题（以冒号结尾，或者包含指标关键词）
+            if (lowerLabel.endsWith(":") &&
+                (lowerLabel.contains("revenue") || lowerLabel.contains("income") ||
+                 lowerLabel.contains("profit") || lowerLabel.contains("expense") ||
+                 lowerLabel.contains("cost") || lowerLabel.contains("loss") ||
+                 lowerLabel.contains("supplemental"))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 获取指标的关键词列表，用于行匹配
+     */
+    private List<String> getMetricKeywords(String metricCode) {
+        List<String> keywords = new java.util.ArrayList<>();
+        if (metricCode == null) {
+            return keywords;
+        }
+        switch (metricCode) {
+            case "REVENUE":
+                keywords.add("revenue");
+                keywords.add("revenues");
+                keywords.add("收入");
+                break;
+            case "OPERATING_INCOME":
+                keywords.add("operating");
+                keywords.add("income");
+                keywords.add("profit");
+                keywords.add("利润");
+                keywords.add("收益");
+                break;
+            case "ADJUSTED_EBITA":
+                keywords.add("ebita");
+                keywords.add("ebit");
+                keywords.add("调整后");
+                break;
+        }
+        return keywords;
+    }
+
+    /**
+     * 从表格标题推断可能的所有指标类型
+     * 支持同一表格包含多种指标的情况（如收入和营业利润在同一表格）
+     */
+    private List<String> inferPossibleMetricsFromTable(FinancialTable table) {
+        String title = table.getTitle();
+        if (title == null) {
+            return java.util.Collections.singletonList(null);
+        }
+
+        String lowerTitle = title.toLowerCase();
+        List<String> metrics = new java.util.ArrayList<>();
+
+        // 特殊处理包含"segment"或多个指标关键词的表格
+        // 如谷歌财报表格："table presents revenue, profitability, and expense information about our segments"
+        boolean isSegmentTable = lowerTitle.contains("segment");
+        boolean hasRevenue = lowerTitle.contains("revenue") || lowerTitle.contains("revenues");
+        boolean hasProfitability = lowerTitle.contains("profitability") || lowerTitle.contains("profit") ||
+                                  lowerTitle.contains("operating income") || lowerTitle.contains("经营利润");
+
+        if (isSegmentTable) {
+            // 分节表格可能包含所有指标，都需要尝试提取
+            if (hasRevenue) {
+                metrics.add("REVENUE");
+            }
+            if (hasProfitability) {
+                metrics.add("OPERATING_INCOME");
+            }
+            // 如果是segment表格但没有明确的指标关键词，尝试所有常见指标
+            if (metrics.isEmpty()) {
+                metrics.add("REVENUE");
+                metrics.add("OPERATING_INCOME");
+                metrics.add("ADJUSTED_EBITA");
+            }
+            logger.trace("Segment table detected, possible metrics: {}", metrics);
+            return metrics;
+        }
+
+        // 对于普通表格，按原来的方式处理
+
+        // 优先检查更具体的指标
+
+        // 检查是否包含 EBITA
+        if (lowerTitle.contains("adjusted ebita") || lowerTitle.contains("经调整ebita") ||
+            lowerTitle.contains("调整后ebita") || lowerTitle.contains("ebita by segment")) {
+            metrics.add("ADJUSTED_EBITA");
+        }
+
+        // 检查是否包含 EBIT
+        if (lowerTitle.contains("ebit") && !metrics.contains("EBIT")) {
+            metrics.add("EBIT");
+        }
+
+        // 检查是否包含营业利润/经营利润
+        if (lowerTitle.contains("operating income") || lowerTitle.contains("经营利润") ||
+            lowerTitle.contains("营业利润")) {
+            metrics.add("OPERATING_INCOME");
+        }
+
+        // 检查是否包含收入
+        if (lowerTitle.contains("revenue") || lowerTitle.contains("收入") ||
+            lowerTitle.contains("营收") || lowerTitle.contains("revenues")) {
+            metrics.add("REVENUE");
+        }
+
+        // 如果没有识别到任何指标，尝试使用原方法
+        if (metrics.isEmpty()) {
+            String singleMetric = inferMetricFromTable(table);
+            if (singleMetric != null) {
+                metrics.add(singleMetric);
+            }
+        }
+
+        logger.trace("Inferred possible metrics from table '{}': {}", title, metrics);
+        return metrics;
+    }
+
+    /**
+     * 根据表格标题推断单一指标类型（原方法保留）
      */
     private String inferMetricFromTable(FinancialTable table) {
         String title = table.getTitle();
