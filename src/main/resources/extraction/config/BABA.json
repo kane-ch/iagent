@@ -4,6 +4,7 @@
   "market": "NYSE",
   "defaultCurrency": "RMB",
   "defaultUnit": "million",
+  "includePeriodTypes": ["Q1","Q2","Q3","Q4"],
   "segments": [
     {
       "segmentCode": "TAOBAO_TMALL",
@@ -72,20 +73,6 @@
       "segmentCode": "CLOUD_INTELLIGENCE",
       "segmentName": "Cloud Intelligence Group",
       "aliases": ["云智能", "阿里云", "Alibaba Cloud", "Cloud"],
-      "level": 1,
-      "parentCode": null
-    },
-    {
-      "segmentCode": "CAINIAO",
-      "segmentName": "Cainiao",
-      "aliases": ["菜鸟"],
-      "level": 1,
-      "parentCode": null
-    },
-    {
-      "segmentCode": "LOCAL_SERVICES",
-      "segmentName": "Local Services Group",
-      "aliases": ["本地服务", "Local services", "Local","Local consumer services"],
       "level": 1,
       "parentCode": null
     }

@@ -3,6 +3,7 @@ package io.invest.iagent.service.extraction.service;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.google.common.collect.Lists;
 import io.invest.iagent.service.filing.util.WorkspacePaths;
 import org.apache.commons.lang3.StringUtils;
 import org.jsoup.Jsoup;
@@ -97,24 +98,19 @@ public class FinancialFileFilter {
 
     private List<Path> xbrlFiles(Path filingDir, JSONObject meta){
         List<Path> instanceFiles = new ArrayList<>();
-        List<Path> inlineFiles = new ArrayList<>();
         for(String name : metaFileNames(meta)){
             String lower = StringUtils.lowerCase(name);
-            if(isSupportFile(lower)){
+            if(!StringUtils.endsWithAny(lower,".htm",".html", ".pdf")){
                 continue;
             }
-            Path path = filingDir.resolve(name);
-            if(StringUtils.endsWith(lower,"_htm.xml")){
-                instanceFiles.add(path);
-            }else if(StringUtils.endsWithAny(lower,".htm", ".html") && looksLikeInlineXbrl(path)){
-                inlineFiles.add(path);
+            if(lower.contains("ex")){
+                continue ;
             }
+            Path path = filingDir.resolve(name);
+            instanceFiles.add(path);
         }
         List<Path> instances = distinctExisting(instanceFiles);
-        if(!instances.isEmpty()){
-            return instances;
-        }
-        return distinctExisting(inlineFiles);
+        return Optional.of(instances).orElse(Lists.newArrayList()) ;
     }
 
     private List<Path> sixKHtmlFiles(Path filingDir, JSONObject meta){
@@ -155,20 +151,6 @@ public class FinancialFileFilter {
             names.add(primaryDocument);
         }
         return names;
-    }
-
-    private boolean isSupportFile(String lowerName){
-        return StringUtils.equalsAny(lowerName,"filingsummary.xml", "meta.json", "filing_manifest.json")
-                || StringUtils.endsWithAny(lowerName,"_cal.xml", "_def.xml", "_lab.xml", "_pre.xml", ".xsd", ".pdf");
-    }
-
-    private boolean looksLikeInlineXbrl(Path file){
-        try{
-            String content = Files.readString(file);
-            return StringUtils.containsAnyIgnoreCase(content, "ix:nonFraction", "ix:nonNumeric", "inlineXBRL");
-        }catch (IOException e){
-            return false;
-        }
     }
 
     private List<Path> distinctExisting(List<Path> files){

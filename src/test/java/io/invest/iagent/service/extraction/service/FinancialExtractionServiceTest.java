@@ -46,6 +46,17 @@ class FinancialExtractionServiceTest {
         Assertions.assertEquals(101449,locale(segments,"CUSTOMER_MANAGEMENT").getMetric("REVENUE","2020Q4").getValue());
     }
 
+    @Test
+    public void extract_baba3() throws IOException {
+        File file = Paths.get(System.getProperty("user.dir")).resolve("workspace/portfolio/BABA/filings/fil_0001104659-26-060224/tm2614494d1_ex99-1.htm").toFile() ;
+        FinancialExtractionService service = new FinancialExtractionService("BABA",workspace);
+        List<Segment> segments = service.extractFromHtmlFile(file) ;
+        Assertions.assertNotNull(segments);
+        System.out.println(JSON.toJSONString(segments));
+        Assertions.assertEquals(5940,locale(segments,"CHINA_COMMERCE_WHOLESALE").getMetric("REVENUE","2026Q1").getValue());
+        Assertions.assertEquals(73024,locale(segments,"CUSTOMER_MANAGEMENT").getMetric("REVENUE","2026Q1").getValue());
+    }
+
     public Segment locale(List<Segment> segments,String segmentCode){
         if(CollectionUtils.isEmpty(segments)){
             return null ;
@@ -66,8 +77,9 @@ class FinancialExtractionServiceTest {
     @Test
     public void extract_baba_2025() throws IOException {
         FinancialExtractionService service = new FinancialExtractionService("BABA",workspace);
-        List<Segment> segments = service.extractFromHtmlFile("BABA","2025","2025") ;
+        List<Segment> segments = service.extractFromHtmlFile("BABA",null,null) ;
         Assertions.assertNotNull(segments);
+        System.out.println(JSON.toJSONString(segments));
     }
 
     @Test
@@ -81,6 +93,14 @@ class FinancialExtractionServiceTest {
         Assertions.assertEquals(9574,localValue(segments,"GOOGLE_CLOUD","REVENUE","2024Q1"));
         Assertions.assertEquals(66885,localValue(getSubSegments(segments,"GOOGLE_SERVICES"),"GOOGLE_ADVERTISING","REVENUE","2025Q1"));
         Assertions.assertEquals(61659,localValue(getSubSegments(segments,"GOOGLE_SERVICES"),"GOOGLE_ADVERTISING","REVENUE","2024Q1"));
+    }
+
+    @Test
+    public void extract_google_2025() throws IOException {
+        FinancialExtractionService service = new FinancialExtractionService("GOOGL",workspace);
+        List<Segment> segments = service.extractFromHtmlFile("GOOGL",null,null) ;
+        Assertions.assertNotNull(segments);
+        System.out.println(JSON.toJSONString(segments));
     }
 
     private List<Segment> getSubSegments(List<Segment> segments,String segmentCode){

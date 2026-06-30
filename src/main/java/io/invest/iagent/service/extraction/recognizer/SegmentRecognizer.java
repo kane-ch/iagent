@@ -4,10 +4,12 @@ import io.invest.iagent.service.extraction.model.CompanyConfig;
 import io.invest.iagent.service.extraction.model.FinancialTable;
 import io.invest.iagent.service.extraction.model.Segment;
 import io.invest.iagent.service.extraction.model.TableRow;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Stack;
 
 /**
@@ -17,7 +19,7 @@ import java.util.Stack;
 @Slf4j
 public class SegmentRecognizer {
 
-
+    @Getter
     private final CompanyConfig companyConfig;
 
     public SegmentRecognizer(CompanyConfig companyConfig) {
@@ -219,6 +221,14 @@ public class SegmentRecognizer {
                 }
             }
         }
+    }
+
+    public boolean match(String label,String segmentCode){
+        CompanyConfig.SegmentConfig config = findSegmentConfig(segmentCode);
+        if(Objects.isNull(config)){
+            return false ;
+        }
+        return config.matches(label) ;
     }
 
     /**

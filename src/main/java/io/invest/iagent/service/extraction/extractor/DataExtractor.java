@@ -6,6 +6,7 @@ import io.invest.iagent.service.extraction.recognizer.SegmentRecognizer;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,9 +47,19 @@ public class DataExtractor {
         // 3. 从叶子节点向上累加数据，填充父节点数据
         aggregateChildMetrics(segments);
 
+        // filter
+        segments = filterByPeriodType(segments);
         logger.info("Extracted data for {} segments", segments.size());
         return segments;
     }
+
+    private List<Segment> filterByPeriodType(List<Segment> segments){
+        filterSegmentsByPeriodType(segments);
+        return segments.stream()
+                .filter(t-> Objects.nonNull(t.getSegmentCode()) || Objects.nonNull(t.getChildren()))
+                .toList() ;
+    }
+
 
     /**
      * 递归处理子分部
@@ -248,6 +259,11 @@ public class DataExtractor {
      * 检查标签是否匹配分部（支持编码、名称的精确匹配、前缀匹配、后缀匹配）
      */
     private boolean matchesSegment(String lowerLabel, String segmentCode, String segmentName) {
+        // config match
+        boolean configMatches = segmentRecognizer.match(lowerLabel, segmentCode);
+        if (configMatches) {
+            return true;
+        }
         // 构建需要匹配的候选名称列表
         List<String> candidates = new java.util.ArrayList<>();
         if (segmentCode != null) {
@@ -433,13 +449,29 @@ public class DataExtractor {
         boolean hasRevenue = lowerTitle.contains("revenue") || lowerTitle.contains("revenues");
         boolean hasProfitability = lowerTitle.contains("profitability") || lowerTitle.contains("profit") ||
                                   lowerTitle.contains("operating income") || lowerTitle.contains("经营利润");
+        // 检查是否有更具体的利润指标关键词
+        boolean hasAdjustedEbita = lowerTitle.contains("adjusted ebita") || lowerTitle.contains("调整后ebita")
+                || lowerTitle.contains("经调整ebita") || lowerTitle.contains("ebita by segment");
+        boolean hasEbita = lowerTitle.contains("ebita") && !hasAdjustedEbita;
+        boolean hasEbitda = lowerTitle.contains("ebitda");
+        boolean hasEbit = lowerTitle.contains("ebit") && !hasEbita && !hasEbitda;
 
         if (isSegmentTable) {
-            // 分节表格可能包含所有指标，都需要尝试提取
+            // 分节表格：根据标题中的具体指标关键词来推断
             if (hasRevenue) {
                 metrics.add("REVENUE");
             }
-            if (hasProfitability) {
+            // 优先匹配更具体的指标（避免同时匹配多个利润指标导致重复）
+            if (hasAdjustedEbita) {
+                metrics.add("ADJUSTED_EBITA");
+            } else if (hasEbitda) {
+                metrics.add("EBITDA");
+            } else if (hasEbita) {
+                metrics.add("ADJUSTED_EBITA");
+            } else if (hasEbit) {
+                metrics.add("EBIT");
+            } else if (hasProfitability) {
+                // 只有当没有更具体的利润指标时才添加通用的 OPERATING_INCOME
                 metrics.add("OPERATING_INCOME");
             }
             // 如果是segment表格但没有明确的指标关键词，尝试所有常见指标
@@ -771,4 +803,69 @@ public class DataExtractor {
         MetricDict dict = metricMapper.getMetricByCode(metricCode);
         return dict != null ? dict.getMetricName() : metricCode;
     }
+
+    /**
+     * 按配置的 includePeriodTypes 过滤分部的指标周期
+     * 递归处理所有子分部
+     */
+    private void filterSegmentsByPeriodType(List<Segment> segments) {
+        List<String> includePeriodTypes = segmentRecognizer.getCompanyConfig().getIncludePeriodTypes();
+        if(CollectionUtils.isEmpty(includePeriodTypes)){
+            return ;
+        }
+        for (Segment segment : segments) {
+            filterSegmentMetricsByPeriodType(segment, includePeriodTypes);
+            // 递归处理子分部
+            if (segment.getChildren() != null && !segment.getChildren().isEmpty()) {
+                filterSegmentsByPeriodType(segment.getChildren());
+            }
+        }
+    }
+
+    /**
+     * 过滤单个分部的指标，只保留配置中指定的周期类型
+     */
+    private void filterSegmentMetricsByPeriodType(Segment segment, List<String> includePeriodTypes) {
+        if (segment.getMetrics() == null || segment.getMetrics().isEmpty()) {
+            return;
+        }
+
+        List<SegmentMetric> filteredMetrics = segment.getMetrics().stream()
+                .filter(metric -> {
+                    String period = metric.getPeriod();
+                    if (StringUtils.isBlank(period)) {
+                        return true; // 保留无周期的指标
+                    }
+                    // 从周期字符串中提取类型部分（如 "2025FY" -> "FY", "2024Q1" -> "Q1"）
+                    String periodType = extractPeriodType(period);
+                    return includePeriodTypes.contains(periodType);
+                })
+                .collect(java.util.stream.Collectors.toList());
+
+        int removedCount = segment.getMetrics().size() - filteredMetrics.size();
+        if (removedCount > 0) {
+            logger.debug("Filtered {} metrics for segment {} by period types: {}",
+                    removedCount, segment.getSegmentCode(), includePeriodTypes);
+        }
+
+        segment.setMetrics(filteredMetrics);
+    }
+
+    /**
+     * 从周期字符串中提取周期类型
+     * 例如: "2025FY" -> "FY", "2024Q1" -> "Q1", "2023H1" -> "H1"
+     */
+    private String extractPeriodType(String period) {
+        if (StringUtils.isBlank(period)) {
+            return "";
+        }
+        // 匹配 FY, Q1-Q4, H1-H2 后缀
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(FY|Q[1-4]|H[12])$", java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Matcher matcher = pattern.matcher(period.trim());
+        if (matcher.find()) {
+            return matcher.group(1).toUpperCase();
+        }
+        return "";
+    }
+
 }

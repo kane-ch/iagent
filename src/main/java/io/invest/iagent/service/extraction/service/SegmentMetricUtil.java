@@ -96,10 +96,11 @@ public class SegmentMetricUtil {
             return;
         }
 
-        // 处理当前业务的指定指标
-        SegmentMetric metric = segment.getMetric(metricCode);
-        if (metric != null) {
-            result.add(convertToDTO(segment, metric));
+        // 处理当前业务的指定指标（遍历所有周期的该指标）
+        for (SegmentMetric metric : segment.getMetrics()) {
+            if (metric.getMetricCode() != null && metric.getMetricCode().equalsIgnoreCase(metricCode)) {
+                result.add(convertToDTO(segment, metric));
+            }
         }
 
         // 递归处理子业务（深度优先）

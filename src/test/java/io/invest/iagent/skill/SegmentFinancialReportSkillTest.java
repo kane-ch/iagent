@@ -1,5 +1,6 @@
 package io.invest.iagent.skill;
 
+import com.alibaba.fastjson2.JSON;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -37,8 +38,30 @@ public class SegmentFinancialReportSkillTest {
     }
 
     @Test
-    public void test_excel() {
+    public void test_excel_baba() {
         String companyName = "阿里巴巴";
+        Msg response = this.doExecute(companyName);
+        String responseText = Objects.requireNonNull(response).getTextContent();
+        Assert.notNull(responseText, "question response");
+    }
+
+    @Test
+    public void test_excel_google() {
+        String companyName = "谷歌";
+        Msg response = this.doExecute(companyName);
+        String responseText = Objects.requireNonNull(response).getTextContent();
+        Assert.notNull(responseText, "question response");
+    }
+
+    @Test
+    public void test_excel_tencent() {
+        String companyName = "腾讯";
+        Msg response = this.doExecute(companyName);
+        String responseText = Objects.requireNonNull(response).getTextContent();
+        Assert.notNull(responseText, "question response");
+    }
+
+    private Msg doExecute(String ticker) {
         String template = """
                 生成公司[%s]所有分部的财务报表，
                 执行流程如下：
@@ -50,10 +73,8 @@ public class SegmentFinancialReportSkillTest {
                 2、严格禁止不通过get_stock_ticker工具获取股票代码。
                 """;
 
-        Msg qaMsg = this.buildUserMsg(String.format(template, companyName));
-        Msg response = baseAgent.call(qaMsg).block();
-        String responseText = Objects.requireNonNull(response).getTextContent();
-        Assert.notNull(responseText, "question response");
+        Msg qaMsg = this.buildUserMsg(String.format(template, ticker));
+        return baseAgent.call(qaMsg).block();
     }
 
     private Msg buildUserMsg(String content){
@@ -69,6 +90,23 @@ public class SegmentFinancialReportSkillTest {
         FinancialSegmentMetricsTool tool = new FinancialSegmentMetricsTool(workspace);
         List<SegmentMetricDTO> segments = tool.queryFinancialMetricsFlatter("BABA") ;
         Assertions.assertNotNull(segments);
+        System.out.println(JSON.toJSONString(segments));
+    }
+
+    @Test
+    public void test_tool_baba_extract() {
+        Path workspace = Paths.get(System.getProperty("user.dir")).resolve("workspace");
+        FinancialSegmentMetricsTool tool = new FinancialSegmentMetricsTool(workspace);
+        List<SegmentMetricDTO> segments = tool.queryFinancialMetricsFlatter("BABA") ;
+        Assertions.assertNotNull(segments);
+    }
+
+    @Test
+    public void test_tool_baba_build() {
+        Path workspace = Paths.get(System.getProperty("user.dir")).resolve("workspace");
+        FinancialSegmentMetricsTool tool = new FinancialSegmentMetricsTool(workspace);
+        String result = tool.exportSegmentExcel("00700") ;
+        Assertions.assertNotNull(result);
     }
 
 }

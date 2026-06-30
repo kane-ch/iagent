@@ -46,14 +46,24 @@ public class FinancialFilingDownloadToolIntegrationTest {
 
     @Test
     void downloadGoogle() {
-        String ticker = "GOOGL";
+        String ticker = "GOOG";
         String fy = "2024,2025,2026";
         String filingType = "10-Q,10-K";
         String result = tool.downloadFiling(ticker, fy, filingType);
         System.out.println(result);
         Assertions.assertThat(Objects.requireNonNull(result))
                 .containsAnyOf( ticker,fy,filingType);
+    }
 
+    @Test
+    void downloadMsft() {
+        String ticker = "MSFT";
+        String fy = "2024,2025,2026";
+        String filingType = "10-Q,10-K";
+        String result = tool.downloadFiling(ticker, fy, filingType);
+        System.out.println(result);
+        Assertions.assertThat(Objects.requireNonNull(result))
+                .containsAnyOf( ticker,fy,filingType);
     }
 
     @Test

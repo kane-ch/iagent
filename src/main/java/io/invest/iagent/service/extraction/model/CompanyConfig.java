@@ -17,12 +17,17 @@ public class CompanyConfig {
     private String market;
     private String defaultCurrency;
     private String defaultUnit;
+    /**
+     * 需要保留的周期类型，可选值 FY、H1、H2、Q1、Q2、Q3、Q4，为空则不过滤
+     */
+    private List<String> includePeriodTypes;
     private List<SegmentConfig> segments;
     private List<MetricMappingRule> metricMappingRules;
 
     public CompanyConfig() {
         this.segments = new ArrayList<>();
         this.metricMappingRules = new ArrayList<>();
+        this.includePeriodTypes = new ArrayList<>();
     }
 
     /**
@@ -35,6 +40,7 @@ public class CompanyConfig {
         private List<String> aliases;
         private int level;
         private String parentCode;
+
 
         public SegmentConfig() {
             this.aliases = new ArrayList<>();

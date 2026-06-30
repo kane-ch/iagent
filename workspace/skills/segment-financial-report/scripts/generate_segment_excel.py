@@ -51,15 +51,22 @@ COLORS = {
     'header_font': 'FFFFFF',  # 表头字体-白色
     'revenue': 'DEEBF7',      # 收入-浅蓝
     'ebita': 'E2EFDA',        # EBITA-浅绿
-    'yoy_decline': 'FF0000',  # YoY下降-红色
-    'yoy_growth': '00B050',   # YoY增长-绿色
+    'yoy_alert': 'FF0000',    # YoY异常-红色（下跌超过5%或上涨超过30%）
     'ratio': 'FFF2CC',        # 比率-浅黄
+    'margin_bg': 'F4B084',    # EBITA利润率-深橙色背景
     'default': None,
+    # 层级颜色（保留兼容）
+    'level1': 'D9E1F2',
+    'level1_font': '1F3864',
+    'level2': 'E2EFDA',
+    'level2_font': '548235',
+    'level3': 'F2F2F2',
+    'level3_font': '000000',
 }
 
 # YoY阈值配置
 YOY_DECLINE_THRESHOLD = -5.0   # 下降超过此阈值红色高亮
-YOY_GROWTH_THRESHOLD = 30.0    # 增长超过此阈值绿色高亮
+YOY_GROWTH_THRESHOLD = 30.0    # 增长超过此阈值红色高亮（异常高增长）
 
 # ─────────────────────────────────────────────────────────────
 # 辅助函数
@@ -85,52 +92,108 @@ def log_stdout(msg):
     print(msg, flush=True)
 
 
-def get_segment_display_name(segment, level=None):
-    """生成分部显示名称，包含层级缩进"""
-    name = segment.get('segmentName', segment.get('segmentId', 'Unknown'))
-    level = level or segment.get('level', 1)
-
-    # 根据层级添加缩进
-    indent = '  ' * (level - 1)
-    prefix = '├─ ' if level > 1 else ''
-    return f"{indent}{prefix}{name}"
-
-
-def get_all_periods(segments):
-    """从所有分部中提取所有周期"""
+def get_all_periods(flat_metrics):
+    """从扁平的指标数据中提取所有周期"""
     periods = set()
+    for metric in flat_metrics:
+        period = metric.get('period')
+        if period:
+            periods.add(period)
 
-    def collect_periods(seg):
-        for metric in seg.get('metrics', []):
-            period = metric.get('period')
-            if period:
-                periods.add(period)
-        for child in seg.get('children', []):
-            collect_periods(child)
-
-    for seg in segments:
-        collect_periods(seg)
-
-    # 按时间排序（如 2024Q1, 2024Q2, 2024Q3, 2024Q4）
-    return sorted(list(periods))
+    # 按时间逆序排序（从最新到最旧，如 2025Q2, 2025Q1, 2024Q4, 2024Q3）
+    return sorted(list(periods), reverse=True)
 
 
-def flatten_segments_by_depth(segments, result=None, parent_level=0):
-    """深度优先遍历，将分层的分部列表展平，保持层级关系"""
-    if result is None:
-        result = []
+def get_all_level1_segments(flat_metrics):
+    """获取所有一级业务分部及其颜色映射"""
+    level1_segments = {}
+    for metric in flat_metrics:
+        if metric.get('level') == 1:
+            seg_code = metric.get('segmentCode')
+            seg_name = metric.get('segmentName')
+            if seg_code and seg_code not in level1_segments:
+                level1_segments[seg_code] = seg_name
 
-    for seg in segments:
-        level = seg.get('level', parent_level + 1)
-        seg['level'] = level
-        result.append(seg)
+    # 按出现顺序返回一级分部编码列表
+    return list(level1_segments.keys())
 
-        # 递归处理子分部（深度优先）
-        children = seg.get('children', [])
-        if children:
-            flatten_segments_by_depth(children, result, level)
 
-    return result
+def get_level1_segment_code(flat_metrics, segment_code):
+    """查找指定分部对应的一级分部编码"""
+    # 构建父子关系映射
+    parent_map = {}
+    for metric in flat_metrics:
+        seg_code = metric.get('segmentCode')
+        parent_code = metric.get('parentSegmentCode')
+        level = metric.get('level', 1)
+        if seg_code and level == 1:
+            parent_map[seg_code] = seg_code  # 一级分部的父级是自己
+        elif seg_code and parent_code:
+            parent_map[seg_code] = parent_code
+
+    # 向上查找直到找到一级分部
+    current = segment_code
+    visited = set()
+    while current in parent_map and current not in visited:
+        visited.add(current)
+        if parent_map[current] == current:  # 找到一级分部
+            return current
+        current = parent_map[current]
+
+    return segment_code  # 如果找不到，返回自己
+
+
+def build_segment_metric_map(flat_metrics, periods):
+    """构建扁平数据的索引映射
+
+    返回: {
+        segment_code: {
+            'segmentName': '...',
+            'level': 1,
+            'parentSegmentCode': '...',
+            'metrics': {
+                'REVENUE': {period1: value, period2: value, ...},
+                'REVENUE_YOY': {period1: value, ...},
+                'ADJUSTED_EBITA': {...},
+                'ADJUSTED_EBITA_YOY': {...},
+            }
+        }
+    }
+    """
+    seg_metric_map = {}
+
+    for item in flat_metrics:
+        seg_code = item.get('segmentCode')
+        if not seg_code:
+            continue
+
+        if seg_code not in seg_metric_map:
+            seg_metric_map[seg_code] = {
+                'segmentName': item.get('segmentName', 'Unknown'),
+                'segmentCode': seg_code,
+                'level': item.get('level', 1),
+                'parentSegmentCode': item.get('parentSegmentCode'),
+                'metrics': {}
+            }
+
+        metric_code = item.get('metricCode')
+        if metric_code:
+            period = item.get('period')
+            value = item.get('value')
+            yoy = item.get('yoyGrowth')
+
+            # 存储指标值
+            if metric_code not in seg_metric_map[seg_code]['metrics']:
+                seg_metric_map[seg_code]['metrics'][metric_code] = {}
+            seg_metric_map[seg_code]['metrics'][metric_code][period] = value
+
+            # 存储YoY值
+            yoy_key = f"{metric_code}_YOY"
+            if yoy_key not in seg_metric_map[seg_code]['metrics']:
+                seg_metric_map[seg_code]['metrics'][yoy_key] = {}
+            seg_metric_map[seg_code]['metrics'][yoy_key][period] = yoy
+
+    return seg_metric_map
 
 
 def has_any_data(values):
@@ -138,125 +201,167 @@ def has_any_data(values):
     return any(v is not None for v in values)
 
 
-def build_data_rows(segments, periods, logger=None):
-    """构建数据行
+def get_display_name(segment_info, level=None):
+    """生成分部显示名称，包含层级缩进"""
+    name = segment_info.get('segmentName', 'Unknown')
+    level = level or segment_info.get('level', 1)
+
+    # 根据层级添加缩进
+    indent = '  ' * (level - 1)
+    prefix = '├─ ' if level > 1 else ''
+    return f"{indent}{prefix}{name}"
+
+
+def build_data_rows_from_flat(flat_metrics, periods, logger=None):
+    """从扁平数据构建数据行
+
     展示逻辑：
-    1. 按层级深度优先遍历（L1 → L21 → L31 → L32 → L22 → L33）
+    1. 按一级业务分组，组内按层级深度优先遍历
     2. 每个分部分组展示：收入 → 收入YoY → EBITA → EBITA YoY → EBITA利润率
     3. 空数据行过滤：指标值全为空则不展示
     """
     rows = []
 
-    # 深度优先遍历展平分部，保持层级
-    flat_segments = flatten_segments_by_depth(segments)
+    # 构建指标映射
+    seg_metric_map = build_segment_metric_map(flat_metrics, periods)
+
+    # 获取一级业务分部（用于分组和颜色）
+    level1_codes = get_all_level1_segments(flat_metrics)
 
     if logger:
-        logger.info(f"深度优先展平后共 {len(flat_segments)} 个分部，{len(periods)} 个周期")
+        logger.info(f"识别到 {len(level1_codes)} 个一级业务分部: {level1_codes}")
+        logger.info(f"共 {len(seg_metric_map)} 个分部数据，{len(periods)} 个周期")
 
-    for seg in flat_segments:
-        level = seg.get('level', 1)
-        seg_name = seg.get('segmentName', 'Unknown')
-        display_name = get_segment_display_name(seg, level)
-        seg_code = seg.get('segmentCode') or seg.get('segmentId')
+    # 构建父子关系用于深度遍历
+    children_map = {}  # parent_code -> [child_codes]
+    for seg_code, seg_info in seg_metric_map.items():
+        parent_code = seg_info.get('parentSegmentCode')
+        if parent_code and parent_code != seg_code:
+            if parent_code not in children_map:
+                children_map[parent_code] = []
+            children_map[parent_code].append(seg_code)
 
-        # ========== 收集数据 ==========
-        revenue_values = []
-        revenue_yoy = []
-        ebita_values = []
-        ebita_yoy = []
-        margin_values = []  # EBITA利润率
+    # 按一级业务分组深度遍历
+    for level1_idx, level1_code in enumerate(level1_codes):
+        level1_info = seg_metric_map.get(level1_code)
+        if not level1_info:
+            continue
 
-        for period_idx, period in enumerate(periods):
-            # 收入数据
-            rev_metric = find_metric(seg, 'REVENUE', period)
-            if rev_metric:
-                revenue_values.append(rev_metric.get('value'))
-                revenue_yoy.append(rev_metric.get('yoyGrowth'))
-            else:
-                revenue_values.append(None)
-                revenue_yoy.append(None)
+        # 深度优先遍历当前一级业务的整棵树
+        def traverse_tree(seg_code):
+            seg_info = seg_metric_map.get(seg_code)
+            if not seg_info:
+                return
 
-            # EBITA数据
-            ebit_metric = find_metric(seg, 'ADJUSTED_EBITA', period) or find_metric(seg, 'OPERATING_INCOME', period)
-            if ebit_metric:
-                ebita_values.append(ebit_metric.get('value'))
-                ebita_yoy.append(ebit_metric.get('yoyGrowth'))
+            level = seg_info.get('level', 1)
+            display_name = get_display_name(seg_info, level)
+
+            # ========== 收集数据 ==========
+            revenue_values = []
+            revenue_yoy = []
+            ebita_values = []
+            ebita_yoy = []
+            margin_values = []  # EBITA利润率
+
+            metrics = seg_info.get('metrics', {})
+
+            for period in periods:
+                # 收入数据
+                rev_val = metrics.get('REVENUE', {}).get(period)
+                rev_yoy_val = metrics.get('REVENUE_YOY', {}).get(period)
+                revenue_values.append(rev_val)
+                revenue_yoy.append(rev_yoy_val)
+
+                # EBITA数据（优先使用 ADJUSTED_EBITA，降级使用 OPERATING_INCOME）
+                ebit_val = (metrics.get('ADJUSTED_EBITA', {}).get(period) or
+                           metrics.get('OPERATING_INCOME', {}).get(period))
+                ebit_yoy_val = (metrics.get('ADJUSTED_EBITA_YOY', {}).get(period) or
+                              metrics.get('OPERATING_INCOME_YOY', {}).get(period))
+                ebita_values.append(ebit_val)
+                ebita_yoy.append(ebit_yoy_val)
+
                 # 计算EBITA利润率 = EBITA / 收入 * 100
-                revenue_val = revenue_values[period_idx]
-                if revenue_val and revenue_val != 0 and ebit_metric.get('value'):
-                    margin = (ebit_metric.get('value') / revenue_val) * 100
+                if rev_val and rev_val != 0 and ebit_val:
+                    margin = (ebit_val / rev_val) * 100
                 else:
                     margin = None
                 margin_values.append(margin)
-            else:
-                ebita_values.append(None)
-                ebita_yoy.append(None)
-                margin_values.append(None)
 
-        # ========== 生成行 ==========
-        # 1. 收入行
-        if has_any_data(revenue_values):
-            rows.append({
-                'type': 'revenue',
-                'level': level,
-                'name': f"{display_name} - 收入",
-                'values': revenue_values,
-                'yoy_values': []  # YoY单独成行
-            })
+            # ========== 生成行 ==========
+            # 记录当前行属于哪个一级业务（用于颜色映射）
+            row_level1_info = {
+                'level1_code': level1_code,
+                'level1_index': level1_idx
+            }
 
-            # 2. 收入YoY行（如果有任何YoY数据）
-            if has_any_data(revenue_yoy):
+            # 1. 收入行
+            if has_any_data(revenue_values):
                 rows.append({
-                    'type': 'revenue_yoy',
+                    'type': 'revenue',
                     'level': level,
-                    'name': f"{display_name} - 收入YoY(%)",
-                    'values': revenue_yoy,
-                    'yoy_values': revenue_yoy
+                    'name': f"{display_name} - 收入",
+                    'values': revenue_values,
+                    'yoy_values': [],
+                    'level1': row_level1_info
                 })
 
-        # 3. EBITA行
-        if has_any_data(ebita_values):
-            rows.append({
-                'type': 'ebita',
-                'level': level,
-                'name': f"{display_name} - EBITA",
-                'values': ebita_values,
-                'yoy_values': []
-            })
+                # 2. 收入YoY行（如果有任何YoY数据）
+                if has_any_data(revenue_yoy):
+                    rows.append({
+                        'type': 'revenue_yoy',
+                        'level': level,
+                        'name': f"{display_name} - 收入YoY(%)",
+                        'values': revenue_yoy,
+                        'yoy_values': revenue_yoy,
+                        'level1': row_level1_info
+                    })
 
-            # 4. EBITA YoY行
-            if has_any_data(ebita_yoy):
+            # 3. EBITA行
+            if has_any_data(ebita_values):
                 rows.append({
-                    'type': 'ebita_yoy',
+                    'type': 'ebita',
                     'level': level,
-                    'name': f"{display_name} - EBITA YoY(%)",
-                    'values': ebita_yoy,
-                    'yoy_values': ebita_yoy
+                    'name': f"{display_name} - EBITA",
+                    'values': ebita_values,
+                    'yoy_values': [],
+                    'level1': row_level1_info
                 })
 
-            # 5. EBITA利润率行
-            if has_any_data(margin_values):
-                rows.append({
-                    'type': 'ebita_margin',
-                    'level': level,
-                    'name': f"{display_name} - EBITA利润率(%)",
-                    'values': margin_values,
-                    'yoy_values': []
-                })
+                # 4. EBITA YoY行
+                if has_any_data(ebita_yoy):
+                    rows.append({
+                        'type': 'ebita_yoy',
+                        'level': level,
+                        'name': f"{display_name} - EBITA YoY(%)",
+                        'values': ebita_yoy,
+                        'yoy_values': ebita_yoy,
+                        'level1': row_level1_info
+                    })
+
+                # 5. EBITA利润率行
+                if has_any_data(margin_values):
+                    rows.append({
+                        'type': 'ebita_margin',
+                        'level': level,
+                        'name': f"{display_name} - EBITA利润率(%)",
+                        'values': margin_values,
+                        'yoy_values': [],
+                        'level1': row_level1_info
+                    })
+
+            # 递归处理子分部
+            children = children_map.get(seg_code, [])
+            # 按分部编码排序（保持稳定顺序）
+            for child_code in sorted(children):
+                traverse_tree(child_code)
+
+        # 开始遍历当前一级业务树
+        traverse_tree(level1_code)
 
     if logger:
         logger.info(f"过滤空数据行后，共生成 {len(rows)} 行数据")
 
     return rows
-
-
-def find_metric(segment, metric_code, period):
-    """在分部中查找指定指标和周期的数据"""
-    for metric in segment.get('metrics', []):
-        if metric.get('metricCode', '').upper() == metric_code.upper():
-            if period is None or metric.get('period') == period:
-                return metric
-    return None
 
 
 def format_value(val):
@@ -266,8 +371,11 @@ def format_value(val):
     return val
 
 
-def generate_excel_with_styling(segments, periods, output_file, ticker, logger=None):
-    """生成带样式的Excel，体现层级关系"""
+def generate_excel_with_styling(flat_metrics, periods, output_file, ticker, logger=None):
+    """生成带样式的Excel，体现层级关系和一级业务分组颜色
+
+    每个一级业务的所有相关行（包括子业务的所有指标行）使用相同的背景色
+    """
     if not HAS_OPENPYXL:
         raise ImportError("需要安装 openpyxl: pip install openpyxl")
 
@@ -278,11 +386,7 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
     # 基础样式
     header_font = Font(bold=True, name="微软雅黑", color=COLORS['header_font'])
     normal_font = Font(name="微软雅黑")
-    level1_font = Font(bold=True, name="微软雅黑", color=COLORS['level1_font'])
-    level2_font = Font(bold=True, name="微软雅黑", color=COLORS['level2_font'])
-    level3_font = Font(name="微软雅黑", color=COLORS['level3_font'])
-    red_font = Font(name="微软雅黑", color=COLORS['yoy_decline'], bold=True)
-    green_font = Font(name="微软雅黑", color=COLORS['yoy_growth'], bold=True)
+    red_font = Font(name="微软雅黑", color=COLORS['yoy_alert'], bold=True)
 
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left_align = Alignment(horizontal='left', vertical='center', wrap_text=True, indent=1)
@@ -294,8 +398,8 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
         bottom=Side(style='thin')
     )
 
-    # 构建数据行
-    data_rows = build_data_rows(segments, periods, logger)
+    # 构建数据行（从扁平数据）
+    data_rows = build_data_rows_from_flat(flat_metrics, periods, logger)
 
     # 写入表头
     # 结构：业务分部 | 指标 | [各期数值]
@@ -317,6 +421,21 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
         row_type = data_row['type']
         name = data_row['name']
         values = data_row['values']
+        level1_info = data_row.get('level1', {})
+        level1_index = level1_info.get('level1_index', 0)
+
+        # 获取当前一级业务对应的背景色（循环使用 LEVEL1_COLORS）
+        color_config = LEVEL1_COLORS[level1_index % len(LEVEL1_COLORS)]
+        bg_color = color_config['bg']
+        font_color = color_config['font']
+
+        # 根据层级选择字体
+        if level == 1:
+            row_font = Font(bold=True, name="微软雅黑", color=font_color)
+        elif level == 2:
+            row_font = Font(bold=True, name="微软雅黑", color=font_color)
+        else:
+            row_font = Font(name="微软雅黑", color=font_color)
 
         # 拆分名称：分部名称 和 指标名称（如 "L1 - 集团总览 - 收入" → "L1 - 集团总览", "收入"）
         name_parts = name.rsplit(' - ', 1)
@@ -327,27 +446,21 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
             segment_name = name
             metric_name = ''
 
-        # ========== 分部名称列（根据层级设置样式） ==========
+        # ========== 确定当前行的背景色 ==========
+        # EBITA利润率行使用特殊的深色背景，其他行使用一级业务颜色
+        if row_type == 'ebita_margin':
+            row_bg_color = COLORS['margin_bg']
+        else:
+            row_bg_color = bg_color
+
+        # ========== 分部名称列 ==========
         name_cell = ws.cell(row=row_idx, column=1)
         name_cell.value = segment_name
         name_cell.border = thin_border
-
-        # 根据层级设置字体和背景色
-        if level == 1:
-            name_cell.font = level1_font
-            name_cell.fill = PatternFill(start_color=COLORS['level1'],
-                                        end_color=COLORS['level1'],
-                                        fill_type="solid")
-        elif level == 2:
-            name_cell.font = level2_font
-            name_cell.fill = PatternFill(start_color=COLORS['level2'],
-                                        end_color=COLORS['level2'],
-                                        fill_type="solid")
-        else:
-            name_cell.font = level3_font
-            name_cell.fill = PatternFill(start_color=COLORS['level3'],
-                                        end_color=COLORS['level3'],
-                                        fill_type="solid")
+        name_cell.font = row_font
+        name_cell.fill = PatternFill(start_color=row_bg_color,
+                                    end_color=row_bg_color,
+                                    fill_type="solid")
         name_cell.alignment = left_align
 
         # ========== 指标类型列 ==========
@@ -355,6 +468,10 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
         metric_cell.value = metric_name
         metric_cell.border = thin_border
         metric_cell.alignment = center_align
+        metric_cell.font = row_font
+        metric_cell.fill = PatternFill(start_color=row_bg_color,
+                                      end_color=row_bg_color,
+                                      fill_type="solid")
 
         # ========== 数据列 ==========
         for col_offset, val in enumerate(values, 0):
@@ -366,12 +483,10 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
             if val is not None and isinstance(val, (int, float)):
                 val_cell.value = round(val, 2) if row_type.endswith('_yoy') or row_type == 'ebita_margin' else format_value(val)
 
-                # YoY行的颜色高亮
+                # YoY行的颜色高亮：下跌超过5%或上涨超过30%都高亮红色
                 if row_type.endswith('_yoy'):
-                    if val <= YOY_DECLINE_THRESHOLD:
+                    if val <= YOY_DECLINE_THRESHOLD or val >= YOY_GROWTH_THRESHOLD:
                         val_cell.font = red_font
-                    elif val >= YOY_GROWTH_THRESHOLD:
-                        val_cell.font = green_font
                     else:
                         val_cell.font = normal_font
                 else:
@@ -391,24 +506,39 @@ def generate_excel_with_styling(segments, periods, output_file, ticker, logger=N
                 val_cell.value = '-'
                 val_cell.font = normal_font
 
-            # 背景色根据行类型
+            # 背景色继承一级业务的颜色（行类型的特殊颜色可以叠加或覆盖）
             if row_type == 'revenue':
-                val_cell.fill = PatternFill(start_color=COLORS['revenue'],
-                                           end_color=COLORS['revenue'],
+                # 收入行使用一级业务颜色（不使用独立颜色，保持同一业务统一）
+                val_cell.fill = PatternFill(start_color=bg_color,
+                                           end_color=bg_color,
                                            fill_type="solid")
             elif row_type == 'ebita':
-                val_cell.fill = PatternFill(start_color=COLORS['ebita'],
-                                           end_color=COLORS['ebita'],
+                # EBITA行使用一级业务颜色
+                val_cell.fill = PatternFill(start_color=bg_color,
+                                           end_color=bg_color,
                                            fill_type="solid")
             elif row_type == 'ebita_margin':
-                # 利润率行背景色（浅黄色）
-                val_cell.fill = PatternFill(start_color=COLORS.get('ratio', 'FFF2CC'),
-                                           end_color=COLORS.get('ratio', 'FFF2CC'),
+                # 利润率行使用更深的背景色（深橙色），突出显示
+                val_cell.fill = PatternFill(start_color=COLORS['margin_bg'],
+                                           end_color=COLORS['margin_bg'],
                                            fill_type="solid")
-            # YoY行背景色继承层级颜色
+            else:
+                # YoY行等其他行继承一级业务颜色
+                val_cell.fill = PatternFill(start_color=bg_color,
+                                           end_color=bg_color,
+                                           fill_type="solid")
 
         # 移动到下一行
         row_idx += 1
+
+    # ========== 设置列宽 ==========
+    # 第1列：业务分部 - 宽度40（适应长名称，如 "├─ L2 - 平台业务 - 国内业务"）
+    ws.column_dimensions[get_column_letter(1)].width = 40
+    # 第2列：指标 - 宽度18（适应 "收入"、"收入YoY(%)"、"EBITA利润率(%)" 等）
+    ws.column_dimensions[get_column_letter(2)].width = 18
+    # 第3列及以后：数据列 - 统一宽度15，便于数值展示
+    for col in range(3, len(periods) + 3):
+        ws.column_dimensions[get_column_letter(col)].width = 15
 
     # 保存工作簿
     wb.save(output_file)
@@ -464,9 +594,9 @@ def main():
             log_stdout("ERROR: 分部数据为空")
             return 1
 
-        logger.info(f"获取到 {len(segments)} 个顶层分部")
+        logger.info(f"获取到 {len(segments)} 条扁平指标数据")
 
-        # 获取所有周期
+        # 从扁平数据中获取所有周期（已按逆序排序：最新在前）
         periods = get_all_periods(segments)
         logger.info(f"包含 {len(periods)} 个财报周期: {periods}")
 
