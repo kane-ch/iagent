@@ -24,10 +24,18 @@ public class CompanyConfig {
     private List<SegmentConfig> segments;
     private List<MetricMappingRule> metricMappingRules;
 
+    /**
+     * PDF 分部表的列映射（用于港股财报，因中文乱码无法依靠label识别分部）
+     * 例如腾讯财报的分部表：[VAS, ONLINE_ADS, FINTECH, OTHERS, TOTAL]
+     * 数据行的每个数值按顺序对应这些列。配置为空表示走通用HTML解析逻辑。
+     */
+    private List<PdfColumnMapping> pdfColumnMappings;
+
     public CompanyConfig() {
         this.segments = new ArrayList<>();
         this.metricMappingRules = new ArrayList<>();
         this.includePeriodTypes = new ArrayList<>();
+        this.pdfColumnMappings = new ArrayList<>();
     }
 
     /**
@@ -80,6 +88,34 @@ public class CompanyConfig {
 
         public MetricMappingRule() {
             this.rawMetricNames = new ArrayList<>();
+        }
+    }
+
+    /**
+     * PDF 表格列映射
+     * 用于识别港股财报 PDF 中的分部数据列（因中文字体乱码，无法靠label匹配）
+     */
+    @Data
+    public static class PdfColumnMapping {
+        /**
+         * 表格列数（如 5 表示这是5列的分部表）
+         */
+        private int columnCount;
+        /**
+         * 各列对应的分部 segmentCode，按从左到右顺序排列
+         * "TOTAL" 是保留字段表示合计列（自动跳过）
+         * 例如：["VAS", "ONLINE_ADS", "FINTECH", "OTHERS", "TOTAL"]
+         */
+        private List<String> segmentCodes;
+        /**
+         * 数据行对应的标准指标编码，按从上到下顺序排列
+         * 例如：["REVENUE", "GROSS_PROFIT"]  表示第一个数据行是收入，第二个是毛利
+         */
+        private List<String> metricCodesByRow;
+
+        public PdfColumnMapping() {
+            this.segmentCodes = new ArrayList<>();
+            this.metricCodesByRow = new ArrayList<>();
         }
     }
 }

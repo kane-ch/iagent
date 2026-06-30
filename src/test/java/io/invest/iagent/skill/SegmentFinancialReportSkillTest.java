@@ -46,8 +46,24 @@ public class SegmentFinancialReportSkillTest {
     }
 
     @Test
+    public void test_excel_pdd() {
+        String companyName = "拼多多";
+        Msg response = this.doExecute(companyName);
+        String responseText = Objects.requireNonNull(response).getTextContent();
+        Assert.notNull(responseText, "question response");
+    }
+
+    @Test
     public void test_excel_google() {
         String companyName = "谷歌";
+        Msg response = this.doExecute(companyName);
+        String responseText = Objects.requireNonNull(response).getTextContent();
+        Assert.notNull(responseText, "question response");
+    }
+
+    @Test
+    public void test_excel_microsoft() {
+        String companyName = "微软";
         Msg response = this.doExecute(companyName);
         String responseText = Objects.requireNonNull(response).getTextContent();
         Assert.notNull(responseText, "question response");
@@ -102,7 +118,7 @@ public class SegmentFinancialReportSkillTest {
     }
 
     @Test
-    public void test_tool_baba_build() {
+    public void test_tool_00700_build() {
         Path workspace = Paths.get(System.getProperty("user.dir")).resolve("workspace");
         FinancialSegmentMetricsTool tool = new FinancialSegmentMetricsTool(workspace);
         String result = tool.exportSegmentExcel("00700") ;

@@ -65,5 +65,12 @@
       "standardMetricCode": "OPERATING_INCOME",
       "rawMetricNames": ["Operating income", "Operating profit", "经营利润", "营业利润", "经营收益"]
     }
+  ],
+  "pdfColumnMappings": [
+    {
+      "columnCount": 5,
+      "segmentCodes": ["VAS", "ONLINE_ADS", "FINTECH", "OTHERS", "TOTAL"],
+      "metricCodesByRow": ["REVENUE", "GROSS_PROFIT"]
+    }
   ]
 }

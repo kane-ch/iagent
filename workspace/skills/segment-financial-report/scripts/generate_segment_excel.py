@@ -93,15 +93,49 @@ def log_stdout(msg):
 
 
 def get_all_periods(flat_metrics):
-    """从扁平的指标数据中提取所有周期"""
+    """从扁平的指标数据中提取所有周期
+
+    排序规则：年份逆序（新→旧），同一年内 FY 在最前面，然后是 Q4/Q3/Q2/Q1、H2/H1
+    例如：[2025FY, 2025Q3, 2025Q2, 2025Q1, 2024FY, 2024Q4, 2024Q3, ...]
+    """
     periods = set()
     for metric in flat_metrics:
         period = metric.get('period')
         if period:
             periods.add(period)
 
-    # 按时间逆序排序（从最新到最旧，如 2025Q2, 2025Q1, 2024Q4, 2024Q3）
-    return sorted(list(periods), reverse=True)
+    def period_sort_key(p):
+        """构造排序键：(年份逆序, 周期类型优先级)
+        年份越大排前面（用负号实现），同年内 FY=0 > Q4=1 > Q3=2 > Q2=3 > Q1=4 > H2=5 > H1=6
+        """
+        import re
+        # 提取年份
+        year_match = re.search(r'(\d{4})', p)
+        year = int(year_match.group(1)) if year_match else 0
+
+        # 提取周期类型
+        upper = p.upper()
+        if 'FY' in upper:
+            type_order = 0
+        elif 'Q4' in upper:
+            type_order = 1
+        elif 'Q3' in upper:
+            type_order = 2
+        elif 'Q2' in upper:
+            type_order = 3
+        elif 'Q1' in upper:
+            type_order = 4
+        elif 'H2' in upper:
+            type_order = 5
+        elif 'H1' in upper:
+            type_order = 6
+        else:
+            type_order = 9
+
+        # 年份越大越靠前 → 用 -year；周期类型按上述顺序
+        return (-year, type_order)
+
+    return sorted(list(periods), key=period_sort_key)
 
 
 def get_all_level1_segments(flat_metrics):

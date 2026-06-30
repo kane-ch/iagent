@@ -103,60 +103,52 @@ public class DataExtractor {
 
     /**
      * 为指定行和指标类型提取数值数据
+     *
+     * 核心思路：表头按顺序定义了多个"周期列"（如 Three Months 2023, Three Months 2024, Nine Months 2023, Nine Months 2024）
+     * 数据行的有效数值按相同顺序对应这些周期列
+     * 我们按出现顺序构建一个 周期列表，然后按出现顺序匹配数据行的有效数值
      */
     private void extractMetricDataForRow(Segment segment, String metricCode, TableRow row, FinancialTable table) {
-        // 从行中提取数值数据 - 遍历所有单元格，每个有数值的列代表一个周期
         List<TableCell> cells = row.getCells();
 
-        // 从表格标题中提取年份和季度信息
+        // 从表格标题中提取年份
         String title = table.getTitle() != null ? table.getTitle() : "";
         int titleYear = extractYearFromText(title);
-        // period
-        String periodType = PeriodTypeUtil.determinePeriodType(table);
-        if(StringUtils.isBlank(periodType)){
-            logger.trace("Could not infer Period type from table: {}", table.getTitle());
-            return ;
+
+        // 确定季度类型（Q1-Q4）作为默认周期后缀
+        String quarterType = PeriodTypeUtil.determinePeriodType(table);
+        if (StringUtils.isBlank(quarterType)) {
+            quarterType = "Q3"; // 默认Q3
         }
-        // 步骤1：首先扫描表格前几行，收集所有可能包含年份的位置
-        java.util.Map<Integer, Integer> columnYearMap = new java.util.HashMap<>();
-        for (int r = 0; r < Math.min(5, table.getRows().size()); r++) {
-            TableRow headerRow = table.getRows().get(r);
-            for (int c = 0; c < headerRow.getCells().size(); c++) {
-                String cellText = headerRow.getCells().get(c).getText();
-                if (cellText != null && !cellText.trim().isEmpty()) {
-                    int year = extractYearFromText(cellText);
-                    if (year > 0) {
-                        columnYearMap.put(c, year);
-                    }
-                }
+
+        // 步骤1：构建有序的周期列表（按出现顺序）
+        // 从表头扫描"Three Months / Nine Months / Year Ended"等周期分组标记
+        // 以及每个分组下的年份顺序
+        List<String> periodSequence = buildPeriodSequence(table, quarterType);
+
+        if (periodSequence.isEmpty()) {
+            // 没有识别到任何周期，回退到旧的逻辑（标题年份）
+            if (titleYear > 0) {
+                periodSequence.add((titleYear - 1) + quarterType);
+                periodSequence.add(titleYear + quarterType);
+            } else {
+                logger.trace("No period sequence found for table: {}", table.getTitle());
+                return;
             }
         }
 
-        // 如果没有找到，尝试从标题推导
-        if (columnYearMap.isEmpty() && titleYear > 0) {
-            // 根据典型的财报结构：2024数据通常在cell 2/3附近，2025在cell 6/7附近
-            columnYearMap.put(3, titleYear - 1);
-            columnYearMap.put(7, titleYear);
-        }
-
-        // 步骤2：为每个数值列确定对应的年份
-        // 规则：找到距离最近的年份列（<=当前列）
-        java.util.List<Integer> sortedYearColumns = new java.util.ArrayList<>(columnYearMap.keySet());
-        java.util.Collections.sort(sortedYearColumns);
-
+        // 步骤2：从数据行中提取有效数值，按出现顺序对应周期列表
+        List<TableCell> validNumericCells = new java.util.ArrayList<>();
         for (int i = 0; i < cells.size(); i++) {
             TableCell cell = cells.get(i);
             if (!cell.isNumeric()) {
                 continue;
             }
-
-            // 跳过百分比数据（避免把55%这样的值当成55提取）
-            // 检查当前列或下一列是否有%
+            // 跳过百分比数据
             boolean isPercentage = false;
             if (cell.getText() != null && cell.getText().contains("%")) {
                 isPercentage = true;
             }
-            // 检查下一列是否是%（有些表格%在单独一列）
             if (i + 1 < cells.size()) {
                 String nextCellText = cells.get(i + 1).getText();
                 if ("%".equals(nextCellText)) {
@@ -166,38 +158,146 @@ public class DataExtractor {
             if (isPercentage) {
                 continue;
             }
+            validNumericCells.add(cell);
+        }
 
-            // 找到最接近当前列的年份列（向左查找）
-            String currentPeriod = "";
-            int bestMatchCol = -1;
-            for (int yearCol : sortedYearColumns) {
-                if (yearCol <= i && yearCol > bestMatchCol) {
-                    bestMatchCol = yearCol;
-                }
-            }
-            if (bestMatchCol >= 0) {
-                currentPeriod = columnYearMap.get(bestMatchCol) + periodType;
-            }
+        // 步骤3：按位置匹配 - 第N个有效数值对应第N个周期
+        // 只保留季度类型的周期（跳过累计周期如 QTD9、H）
+        int matchCount = Math.min(validNumericCells.size(), periodSequence.size());
+        for (int idx = 0; idx < matchCount; idx++) {
+            String period = periodSequence.get(idx);
+            TableCell cell = validNumericCells.get(idx);
 
-            // 过滤掉空的 period
-            if (currentPeriod.trim().isEmpty()) {
+            // 跳过累计周期（QTD9 / H 等），只保留季度数据
+            if (period.endsWith("QTD9") || period.endsWith("QTD6") || period.endsWith("H")) {
                 continue;
             }
 
             // 如果这个周期的指标已经存在，跳过（避免重复）
-            if (segment.getMetric(metricCode, currentPeriod) != null) {
+            if (segment.getMetric(metricCode, period) != null) {
                 logger.trace("Metric {} for period '{}' already exists for segment: {}",
-                    metricCode, currentPeriod, segment.getSegmentName());
+                        metricCode, period, segment.getSegmentName());
                 continue;
             }
 
             // 为每个周期创建独立的指标
-            SegmentMetric metric = createMetricWithPeriod(metricCode, cell, table, currentPeriod);
+            SegmentMetric metric = createMetricWithPeriod(metricCode, cell, table, period);
             segment.addMetric(metric);
             logger.debug("Extracted metric for {}: {} = {} (period: {}, table: {})",
                     segment.getSegmentName(), metricCode, cell.getNumericValue(),
-                    currentPeriod, table.getTableId());
+                    period, table.getTableId());
         }
+    }
+
+    /**
+     * 从表格表头按出现顺序构建周期列表
+     * 例如表头是：
+     *   行0: Three Months Ended | Nine Months Ended
+     *   行2: 2023 | 2024 | 2023 | 2024
+     * 则返回: [2023Q3, 2024Q3, 2023QTD9, 2024QTD9]
+     *
+     * 默认周期类型为传入的 defaultQuarter（如Q3）
+     */
+    private List<String> buildPeriodSequence(FinancialTable table, String defaultQuarter) {
+        List<String> periodSequence = new java.util.ArrayList<>();
+
+        // 1) 扫描表头前5行，按出现顺序收集"周期分组标记"列表和"年份"列表
+        //    周期分组列表按出现位置排序 [{列, 后缀}, ...]
+        //    年份列表按出现位置排序 [{列, 年份}, ...]
+        List<int[]> groupColumns = new java.util.ArrayList<>(); // [列, 后缀index]
+        List<String> groupSuffixes = new java.util.ArrayList<>(); // suffix序列
+        List<int[]> yearColumns = new java.util.ArrayList<>(); // [列, 年份]
+
+        int headerRowEnd = Math.min(5, table.getRows().size());
+        for (int r = 0; r < headerRowEnd; r++) {
+            TableRow headerRow = table.getRows().get(r);
+            for (int c = 0; c < headerRow.getCells().size(); c++) {
+                String cellText = headerRow.getCells().get(c).getText();
+                if (cellText == null || cellText.trim().isEmpty()) {
+                    continue;
+                }
+                String lowerText = cellText.toLowerCase();
+
+                // 识别累计/季度分组标记
+                String suffix = null;
+                if (lowerText.contains("nine month") || lowerText.contains("9 month") ||
+                    lowerText.contains("nine-month") || lowerText.contains("year to date") ||
+                    lowerText.contains("ytd")) {
+                    suffix = "QTD9";
+                } else if (lowerText.contains("six month") || lowerText.contains("6 month") ||
+                           lowerText.contains("six-month")) {
+                    suffix = "QTD6";
+                } else if (lowerText.contains("year ended") || lowerText.contains("twelve months") ||
+                           lowerText.contains("12 months") || lowerText.contains("full year") ||
+                           lowerText.contains("fiscal year")) {
+                    suffix = "FY";
+                } else if (lowerText.contains("three month") || lowerText.contains("3 month") ||
+                           lowerText.contains("quarter")) {
+                    suffix = defaultQuarter;
+                }
+                if (suffix != null) {
+                    groupColumns.add(new int[]{c, groupSuffixes.size()});
+                    groupSuffixes.add(suffix);
+                }
+
+                // 提取年份
+                int year = extractYearFromText(cellText);
+                if (year > 0) {
+                    yearColumns.add(new int[]{c, year});
+                }
+            }
+        }
+
+        // 按列号升序排序
+        yearColumns.sort((a, b) -> Integer.compare(a[0], b[0]));
+        groupColumns.sort((a, b) -> Integer.compare(a[0], b[0]));
+
+        // 2) 关键算法：按出现顺序分组年份
+        //    将年份序列按顺序分组，每组的大小等于该分组下的年份数量
+        //    例如：分组数=2 (Three Months, Nine Months)，年份数=4 (2023,2024,2023,2024)
+        //    则每组有 4/2 = 2 个年份：第1组 [2023,2024]→Three Months，第2组 [2023,2024]→Nine Months
+
+        if (groupSuffixes.isEmpty()) {
+            // 没有分组标记，全部使用默认季度
+            for (int[] yc : yearColumns) {
+                periodSequence.add(yc[1] + defaultQuarter);
+            }
+            return periodSequence;
+        }
+
+        int numGroups = groupSuffixes.size();
+        int numYears = yearColumns.size();
+
+        if (numYears % numGroups == 0) {
+            // 均匀分组
+            int yearsPerGroup = numYears / numGroups;
+            for (int g = 0; g < numGroups; g++) {
+                String suffix = groupSuffixes.get(g);
+                for (int y = 0; y < yearsPerGroup; y++) {
+                    int year = yearColumns.get(g * yearsPerGroup + y)[1];
+                    periodSequence.add(year + suffix);
+                }
+            }
+        } else {
+            // 不均匀分组：按列号位置匹配（落在哪个分组列之后）
+            // 用 floorEntry 风格的匹配
+            for (int[] yc : yearColumns) {
+                int col = yc[0];
+                int year = yc[1];
+                String suffix = defaultQuarter;
+                // 找到 col 之前最近的分组标记
+                for (int[] gc : groupColumns) {
+                    if (gc[0] <= col) {
+                        suffix = groupSuffixes.get(gc[1]);
+                    } else {
+                        break;
+                    }
+                }
+                periodSequence.add(year + suffix);
+            }
+        }
+
+        return periodSequence;
     }
 
     /**
@@ -436,32 +536,53 @@ public class DataExtractor {
      */
     private List<String> inferPossibleMetricsFromTable(FinancialTable table) {
         String title = table.getTitle();
-        if (title == null) {
-            return java.util.Collections.singletonList(null);
+        String lowerTitle = title != null ? title.toLowerCase() : "";
+
+        // 从行标签中识别节标题，例如 "Revenues:" 或 "Operating income (loss):"
+        // 没有标题或标题无法推断时，回退到扫描节标题行
+        boolean hasRevenueSection = false;
+        boolean hasOperatingIncomeSection = false;
+        boolean hasEbitaSection = false;
+        for (TableRow r : table.getRows()) {
+            String label = r.getLabel();
+            if (label == null) continue;
+            String ll = label.toLowerCase().trim();
+            if (ll.endsWith(":") || ll.contains("total")) {
+                if (ll.contains("revenue") || ll.contains("revenues")) {
+                    hasRevenueSection = true;
+                }
+                if (ll.contains("operating income") || ll.contains("operating profit") ||
+                    ll.contains("income from operations")) {
+                    hasOperatingIncomeSection = true;
+                }
+                if (ll.contains("ebita")) {
+                    hasEbitaSection = true;
+                }
+            }
         }
 
-        String lowerTitle = title.toLowerCase();
         List<String> metrics = new java.util.ArrayList<>();
 
         // 特殊处理包含"segment"或多个指标关键词的表格
-        // 如谷歌财报表格："table presents revenue, profitability, and expense information about our segments"
         boolean isSegmentTable = lowerTitle.contains("segment");
-        boolean hasRevenue = lowerTitle.contains("revenue") || lowerTitle.contains("revenues");
+        boolean hasRevenue = lowerTitle.contains("revenue") || lowerTitle.contains("revenues") || hasRevenueSection;
         boolean hasProfitability = lowerTitle.contains("profitability") || lowerTitle.contains("profit") ||
-                                  lowerTitle.contains("operating income") || lowerTitle.contains("经营利润");
+                                  lowerTitle.contains("operating income") || lowerTitle.contains("经营利润") ||
+                                  hasOperatingIncomeSection;
         // 检查是否有更具体的利润指标关键词
         boolean hasAdjustedEbita = lowerTitle.contains("adjusted ebita") || lowerTitle.contains("调整后ebita")
-                || lowerTitle.contains("经调整ebita") || lowerTitle.contains("ebita by segment");
+                || lowerTitle.contains("经调整ebita") || lowerTitle.contains("ebita by segment") || hasEbitaSection;
         boolean hasEbita = lowerTitle.contains("ebita") && !hasAdjustedEbita;
         boolean hasEbitda = lowerTitle.contains("ebitda");
         boolean hasEbit = lowerTitle.contains("ebit") && !hasEbita && !hasEbitda;
 
-        if (isSegmentTable) {
+        // 如果通过行扫描发现了多个指标节，或检测到任何节标题，按segment table处理
+        if (isSegmentTable || hasRevenueSection || hasOperatingIncomeSection || hasEbitaSection) {
             // 分节表格：根据标题中的具体指标关键词来推断
             if (hasRevenue) {
                 metrics.add("REVENUE");
             }
-            // 优先匹配更具体的指标（避免同时匹配多个利润指标导致重复）
+            // 优先匹配更具体的指标
             if (hasAdjustedEbita) {
                 metrics.add("ADJUSTED_EBITA");
             } else if (hasEbitda) {
@@ -471,7 +592,6 @@ public class DataExtractor {
             } else if (hasEbit) {
                 metrics.add("EBIT");
             } else if (hasProfitability) {
-                // 只有当没有更具体的利润指标时才添加通用的 OPERATING_INCOME
                 metrics.add("OPERATING_INCOME");
             }
             // 如果是segment表格但没有明确的指标关键词，尝试所有常见指标

@@ -7,6 +7,7 @@ import io.invest.iagent.service.extraction.extractor.DataExtractor;
 import io.invest.iagent.service.extraction.mapper.MetricMapper;
 import io.invest.iagent.service.extraction.model.*;
 import io.invest.iagent.service.extraction.parser.HtmlReportParser;
+import io.invest.iagent.service.extraction.parser.PdfReportParser;
 import io.invest.iagent.service.extraction.parser.ReportParser;
 import io.invest.iagent.service.extraction.recognizer.SegmentRecognizer;
 import io.invest.iagent.service.extraction.validator.QualityValidator;
@@ -28,7 +29,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class FinancialExtractionService {
 
-    private final ReportParser reportParser;
+    private final ReportParser htmlReportParser;
+    private final PdfReportParser pdfReportParser;
     private final MetricMapper metricMapper;
     private final QualityValidator qualityValidator;
     private final CompanyConfigLoader configLoader;
@@ -40,7 +42,9 @@ public class FinancialExtractionService {
 
     public FinancialExtractionService(Path workspace) {
         this.metricMapper = new MetricMapper();
-        this.reportParser = new HtmlReportParser();
+        this.htmlReportParser = new HtmlReportParser();
+        this.pdfReportParser = new PdfReportParser();
+        this.pdfReportParser.setWorkspace(workspace);
         this.qualityValidator = new QualityValidator();
         this.fileFilter = new FinancialFileFilter(workspace) ;
         this.configLoader = new CompanyConfigLoader();
@@ -54,6 +58,7 @@ public class FinancialExtractionService {
         this.companyConfig = configLoader.loadConfig(companyCode);
         this.segmentRecognizer = new SegmentRecognizer(companyConfig);
         this.dataExtractor = new DataExtractor(segmentRecognizer, metricMapper);
+        this.pdfReportParser.setCompanyConfig(companyConfig);
     }
 
     /**
@@ -64,6 +69,7 @@ public class FinancialExtractionService {
         this.companyConfig = companyConfig;
         this.segmentRecognizer = new SegmentRecognizer(companyConfig);
         this.dataExtractor = new DataExtractor(segmentRecognizer, metricMapper);
+        this.pdfReportParser.setCompanyConfig(companyConfig);
     }
 
     public List<Segment> extractFromHtmlFile(String tickerCode,String fiscalYearStart,String fiscalYearEnd) throws IOException {
@@ -90,19 +96,26 @@ public class FinancialExtractionService {
 
 
     /**
-     * 从HTML文件中提取财务数据
+     * 从文件中提取财务数据（支持HTML和PDF）
      */
-    public List<Segment> extractFromHtmlFile(File htmlFile) throws IOException {
-        log.info("Extracting financial data from HTML file: {}", htmlFile.getName());
-        
-        // 1. 解析HTML，提取表格
-        List<FinancialTable> tables = reportParser.parse(htmlFile);
+    public List<Segment> extractFromHtmlFile(File file) throws IOException {
+        String fileName = file.getName().toLowerCase();
+        log.info("Extracting financial data from file: {}", fileName);
+
+        List<FinancialTable> tables;
+        if (fileName.endsWith(".pdf")) {
+            // PDF文件使用PDF解析器
+            tables = pdfReportParser.parse(file);
+        } else {
+            // HTML文件使用HTML解析器
+            tables = htmlReportParser.parse(file);
+        }
         log.info("Parsed file {} financial tables", tables.size());
-        
+
         // 2. 从表格中提取分部数据
         List<Segment> segments = dataExtractor.extractFromMultipleTables(tables);
         log.info("Extracted file {} segments with financial data", segments.size());
-        
+
         return segments;
     }
 
@@ -111,15 +124,15 @@ public class FinancialExtractionService {
      */
     public List<Segment> extractFromHtmlContent(String htmlContent) {
         log.info("Extracting financial data from HTML content, length: {}", htmlContent.length());
-        
+
         // 1. 解析HTML，提取表格
-        List<FinancialTable> tables = reportParser.parseHtml(htmlContent);
+        List<FinancialTable> tables = htmlReportParser.parseHtml(htmlContent);
         log.info("Parsed {} financial tables", tables.size());
-        
+
         // 2. 从表格中提取分部数据
         List<Segment> segments = dataExtractor.extractFromMultipleTables(tables);
         log.info("Extracted {} segments with financial data", segments.size());
-        
+
         return segments;
     }
 
@@ -142,6 +155,7 @@ public class FinancialExtractionService {
         this.companyConfig = companyConfig;
         this.segmentRecognizer = new SegmentRecognizer(companyConfig);
         this.dataExtractor = new DataExtractor(segmentRecognizer, metricMapper);
+        this.pdfReportParser.setCompanyConfig(companyConfig);
     }
 
     /**

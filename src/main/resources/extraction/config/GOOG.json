@@ -4,7 +4,7 @@
   "market": "NASDAQ",
   "defaultCurrency": "USD",
   "defaultUnit": "million",
-  "includePeriodTypes": ["Q1","Q2","Q3","Q4"],
+  "includePeriodTypes": ["Q1","Q2","Q3","Q4","FY"],
   "segments": [
     {
       "segmentCode": "GOOGLE_SERVICES",
@@ -52,13 +52,6 @@
       "segmentCode": "GOOGLE_CLOUD",
       "segmentName": "Google Cloud",
       "aliases": ["Google Cloud", "谷歌云", "GCP"],
-      "level": 1,
-      "parentCode": null
-    },
-    {
-      "segmentCode": "OTHER_BETS",
-      "segmentName": "Other Bets",
-      "aliases": ["Other Bets", "其他押注", "其他业务"],
       "level": 1,
       "parentCode": null
     }

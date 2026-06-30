@@ -51,6 +51,10 @@ public class FinancialFileFilter {
             return List.of() ;
         }
         String formType = meta.getString("form_type");
+        // 港股格式兼容
+        if(StringUtils.isBlank(formType)){
+            formType = meta.getString("formType");
+        }
         List<Path> values = new ArrayList<>();
         // 10-K \ 10-Q
         if(isXbrlFiling(meta, formType)){
@@ -66,11 +70,16 @@ public class FinancialFileFilter {
                 values.add( file);
             }
         }
+        // PDF财报（港股等）
+        values.addAll(pdfFiles(filingDir, meta));
         return values;
     }
 
     private boolean within(JSONObject meta, String fiscalYearStart, String fiscalYearEnd){
         String theYear = meta.getString("fiscal_year");
+        if(StringUtils.isBlank(theYear)){
+            theYear = meta.getString("fiscalYear");
+        }
         if(StringUtils.isBlank(theYear)){
             return false ;
         }
@@ -84,6 +93,11 @@ public class FinancialFileFilter {
     }
 
     private boolean isActiveCompleteFiling(JSONObject meta){
+        // 港股财报没有ingest_complete字段，默认视为已完成
+        if(!meta.containsKey("ingest_complete")){
+            // 检查港股的deleted标志（如果有）
+            return !meta.getBooleanValue("is_deleted") && !meta.getBooleanValue("deleted");
+        }
         if(Boolean.FALSE.equals(meta.getBoolean("ingest_complete"))){
             return false;
         }
@@ -94,6 +108,26 @@ public class FinancialFileFilter {
         return meta.getBooleanValue("has_xbrl")
                 && StringUtils.equalsAnyIgnoreCase(formType,
                 "10-K", "10-Q", "20-F", "40-F", "10-K/A", "10-Q/A", "20-F/A", "40-F/A");
+    }
+
+    private boolean isHkFiling(JSONObject meta, String formType){
+        // 港股财报通常是PDF格式，通过form_type或source判断
+        boolean isHk = StringUtils.equalsIgnoreCase(meta.getString("source"), "hkex") ||
+               StringUtils.containsIgnoreCase(formType, "HK") ||
+               StringUtils.containsIgnoreCase(formType, "FY") ||
+               StringUtils.containsIgnoreCase(formType, "H1") ||
+               StringUtils.containsIgnoreCase(formType, "ANN");
+
+        // 检查是否有PDF文件
+        if(isHk){
+            List<String> fileNames = metaFileNames(meta);
+            for(String name : fileNames){
+                if(StringUtils.lowerCase(name).endsWith(".pdf")){
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<Path> xbrlFiles(Path filingDir, JSONObject meta){
@@ -136,6 +170,8 @@ public class FinancialFileFilter {
 
     private List<String> metaFileNames(JSONObject meta){
         List<String> names = new ArrayList<>();
+
+        // SEC/美股格式: files数组
         JSONArray files = meta.getJSONArray("files");
         if(Objects.nonNull(files)){
             for(int i=0;i<files.size();i++){
@@ -146,10 +182,22 @@ public class FinancialFileFilter {
                 }
             }
         }
+
+        // SEC格式: primary_document
         String primaryDocument = meta.getString("primary_document");
         if(StringUtils.isNotBlank(primaryDocument)){
             names.add(primaryDocument);
         }
+
+        // 港股格式: primaryFile对象
+        JSONObject primaryFile = meta.getJSONObject("primaryFile");
+        if(primaryFile != null){
+            String name = primaryFile.getString("name");
+            if(StringUtils.isNotBlank(name)){
+                names.add(name);
+            }
+        }
+
         return names;
     }
 
@@ -157,6 +205,21 @@ public class FinancialFileFilter {
         LinkedHashSet<Path> distinct = new LinkedHashSet<>();
         files.stream().filter(Files::exists).forEach(distinct::add);
         return new ArrayList<>(distinct);
+    }
+
+    /**
+     * 获取目录中的PDF文件（港股财报通常是PDF格式）
+     */
+    private List<Path> pdfFiles(Path filingDir, JSONObject meta){
+        List<Path> pdfFiles = new ArrayList<>();
+        for(String name : metaFileNames(meta)){
+            String lower = StringUtils.lowerCase(name);
+            if(lower.endsWith(".pdf")){
+                Path path = filingDir.resolve(name);
+                pdfFiles.add(path);
+            }
+        }
+        return distinctExisting(pdfFiles);
     }
 
     private boolean looksLikeFinancialSixK(String html){
